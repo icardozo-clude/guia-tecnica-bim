@@ -45,6 +45,22 @@
   #bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:12px 0 6px}
   #bar div{height:100%;width:0;background:var(--accent);transition:width .2s}
   #hint{position:absolute;z-index:3;left:50%;bottom:12px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;font-size:12px;color:var(--muted);white-space:nowrap}
+  #planos{position:absolute;inset:0;z-index:7;background:var(--bg);display:flex;flex-direction:column}
+  #planos[hidden]{display:none}
+  .ptool{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .ptool .sp{flex:1}
+  .ptool a{text-decoration:none}
+  #pStatus{padding:6px 16px}
+  #pGrid{flex:1;overflow:auto;padding:8px 16px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;align-content:start}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;text-align:left;padding:0}
+  .card:hover{border-color:var(--accent)}
+  .card canvas{display:block;width:100%;height:auto;background:#fff}
+  .card .ct{padding:8px 10px}
+  .card .cn{font-weight:700;color:var(--accent)}
+  .card .cd{font-size:12px;color:var(--muted)}
+  #pView{flex:1;overflow:auto;background:#7d8590;cursor:grab;touch-action:pan-x pan-y}
+  #pView[hidden]{display:none}
+  #pView canvas{display:block;margin:12px auto;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.3)}
   @media (max-width:760px){
     header{padding:8px 16px}
     header p{display:none}
@@ -62,6 +78,7 @@
     <h1>Guía técnica · Vivienda de dos pisos en mampostería confinada en ladera</h1>
     <p>Modelo BIM estructural · Juan Rey (La Paz), Bogotá · Iván Camilo Cardoso Valbuena · Director: Ing. Carlos Ortiz Mesa · Universidad Colegio Mayor de Cundinamarca</p>
   </div>
+  <button id="btnPlanos">Planos</button>
   <button id="togglePanel" aria-label="Mostrar opciones">Opciones</button>
 </header>
 <div id="view"></div>
@@ -80,6 +97,23 @@
 
 <aside id="info"><button id="closeInfo" style="float:right">Cerrar</button><h3 id="infoT"></h3><div id="infoB"></div></aside>
 <div id="hint">Arrastra para girar · rueda o pellizco para acercar · clic derecho o dos dedos para desplazar</div>
+
+<section id="planos" hidden>
+  <div class="ptool">
+    <button id="pBack" hidden>‹ Planos</button>
+    <strong id="pTitle">Planos estructurales</strong>
+    <span class="sp"></span>
+    <span id="pCtl" hidden>
+      <button id="pPrev" aria-label="Plano anterior">◀</button><button id="pNext" aria-label="Plano siguiente">▶</button>
+      <button id="pOut" aria-label="Alejar">−</button><button id="pIn" aria-label="Acercar">+</button><button id="pFit">Ajustar</button>
+      <a id="pOpen" target="_blank" rel="noopener"><button>Abrir PDF</button></a>
+    </span>
+    <button id="pClose">Modelo 3D</button>
+  </div>
+  <div id="pStatus" class="small"></div>
+  <div id="pGrid"></div>
+  <div id="pView" hidden><canvas id="pCanvas"></canvas></div>
+</section>
 
 <div id="loader"><div class="box">
   <strong>Cargando el modelo…</strong>
@@ -106,15 +140,31 @@ const fail = e => { console.error(e); $('ltxt').textContent = 'No se pudo cargar
 
 // ---------- categorias ----------
 const CATS = [
-  { key:'cim',   name:'Cimentación y ciclópeo', color:'#9e9e9e', types:['IFCFOOTING'] },
-  { key:'vig',   name:'Vigas',                  color:'#b0b7bf', types:['IFCBEAM'] },
-  { key:'col',   name:'Columnetas',             color:'#b0b7bf', types:['IFCCOLUMN'] },
-  { key:'mur',   name:'Muros',                  color:'#b5654a', types:['IFCWALL','IFCWALLSTANDARDCASE'] },
-  { key:'pla',   name:'Placas y losas',         color:'#c9ced4', types:['IFCSLAB'] },
-  { key:'cub',   name:'Cubierta',               color:'#7b8f6a', types:['IFCROOF','IFCCOVERING','IFCMEMBER','IFCPLATE'] },
-  { key:'ace',   name:'Acero de refuerzo',      color:'#d32f2f', types:['IFCREINFORCINGBAR','IFCREINFORCINGMESH'] },
-  { key:'otr',   name:'Otros',                  color:'#bdbdbd', types:[] },
+  { key:'ter', name:'Terreno (topografía)',          color:'#8d7b68', types:[] },
+  { key:'cim', name:'Cimentación: vigas y ciclópeo', color:'#9e9e9e', types:['IFCFOOTING'] },
+  { key:'reb', name:'Recebo compactado',             color:'#c8b48a', types:[] },
+  { key:'col', name:'Columnetas',                    color:'#b0b7bf', types:['IFCCOLUMN'] },
+  { key:'mur', name:'Muros',                         color:'#b5654a', types:['IFCWALL','IFCWALLSTANDARDCASE'] },
+  { key:'vig', name:'Vigas de amarre y dinteles',    color:'#b0b7bf', types:['IFCBEAM'] },
+  { key:'pla', name:'Placas y losa de entrepiso',    color:'#c9ced4', types:['IFCSLAB'] },
+  { key:'esc', name:'Escalera y baranda',            color:'#9aa5b1', types:['IFCSTAIR','IFCSTAIRFLIGHT','IFCRAILING'] },
+  { key:'cub', name:'Cubierta',                      color:'#4caf50', types:['IFCROOF','IFCCOVERING','IFCMEMBER','IFCPLATE'] },
+  { key:'ace', name:'Acero de refuerzo y malla',     color:'#d32f2f', types:['IFCREINFORCINGBAR','IFCREINFORCINGMESH'] },
+  { key:'otr', name:'Otros',                         color:'#bdbdbd', types:[] },
 ];
+// reglas por nombre del elemento (familia:tipo de Revit)
+const RULES = [ [/topogr|toposolid|terreno/i,'ter'], [/recebo/i,'reb'], [/cimentaci|ciclop/i,'cim'],
+  [/teja|caballete|perfil de cubierta|cubierta|correa/i,'cub'], [/escalera|barandilla|baranda/i,'esc'] ];
+const decodeIfc = s => String(s || '').replace(/\\X\\([0-9A-F]{2})/gi, (m, h) => String.fromCharCode(parseInt(h, 16)));
+function classify(id){
+  let code = null; try { code = api.GetLineType(modelID, id); } catch(e) {}
+  const byType = typeToCat[code] || 'otr';
+  if (byType === 'ace' || byType === 'mur' || byType === 'col') return byType;
+  let name = '';
+  try { const l = api.GetLine(modelID, id, false); name = decodeIfc((l.Name && l.Name.value) || '') + ' ' + decodeIfc((l.ObjectType && l.ObjectType.value) || ''); } catch(e) {}
+  for (const [re, c] of RULES) if (re.test(name)) return c;
+  return byType;
+}
 const typeToCat = {};
 const coarse = matchMedia('(pointer:coarse)').matches;
 const visibleDefault = { ace: !coarse };
@@ -181,8 +231,7 @@ async function main(){
   let count = 0;
   api.StreamAllMeshes(modelID, mesh => {
     const id = mesh.expressID;
-    let cat = 'otr';
-    try { cat = typeToCat[api.GetLineType(modelID, id)] || 'otr'; } catch(e) {}
+    const cat = classify(id);
     const A = acc[cat];
     const pgs = mesh.geometries;
     for (let i = 0; i < pgs.size(); i++) {
@@ -329,6 +378,110 @@ async function showInfo(id){
     $('infoB').innerHTML = h;
   } catch(e) { $('infoB').innerHTML = '<p class="small">No se pudieron leer las propiedades.</p>'; console.error(e); }
 }
+
+// ---------- planos ----------
+const PDF_URL = 'planos.pdf';
+const PDFJS_VERSIONS = ['4.4.168', '4.2.67', '4.0.379'];
+const INDEX = {0:'Portada',1:'Índice, notas generales y convenciones',2:'Ejes, niveles y nomenclatura',3:'Replanteo de la excavación',
+  4:'Camillas y nivelación con manguera',5:'Planta de vigas de cimentación',6:'Viga de cimentación tipo 1',7:'Viga de cimentación tipo 2',
+  8:'Viga de cimentación tipo 3',9:'Viga de cimentación tipo 4 y escalón',10:'Arranques, instalaciones y recebo',11:'Muros y columnetas del piso 1',
+  12:'Despiece de columnetas',13:'Dinteles y vigas de antepecho',14:'Placa de contrapiso y sardinel',15:'Vigas de entrepiso',16:'Losa de entrepiso',
+  17:'Muros y columnetas del piso 2',18:'Despiece (piso 2)',19:'Vigas de enrase',20:'Culatas',21:'Cubierta',22:'Detalles típicos y cuadro de cantidades'};
+let pdfjs = null, pdfDoc = null, plist = [], cur = -1, zoom = 1, rtask = null;
+const mobile = matchMedia('(max-width:760px)').matches || coarse;
+const MAX_PIX = mobile ? 16e6 : 60e6;
+$('btnPlanos').onclick = openPlanos;
+$('pClose').onclick = () => { $('planos').hidden = true; needs = true; };
+$('pBack').onclick = showGrid;
+$('pPrev').onclick = () => { if (cur > 0) showPage(cur - 1); };
+$('pNext').onclick = () => { if (cur < plist.length - 1) showPage(cur + 1); };
+$('pIn').onclick = () => setZoom(zoom * 1.5);
+$('pOut').onclick = () => setZoom(zoom / 1.5);
+$('pFit').onclick = () => setZoom(1);
+
+async function openPlanos(){
+  $('planos').hidden = false;
+  if (pdfDoc) return;
+  $('pStatus').textContent = 'Cargando los planos…';
+  try {
+    let err = [];
+    for (const v of PDFJS_VERSIONS) {
+      try {
+        const base = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + v + '/build/';
+        const mod = await import(base + 'pdf.min.mjs');
+        mod.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.mjs';
+        pdfjs = mod; break;
+      } catch(e) { err.push(v + ': ' + e.message); }
+    }
+    if (!pdfjs) throw new Error('no cargó el lector de PDF (' + err.join(' | ') + ')');
+    pdfDoc = await pdfjs.getDocument({ url: PDF_URL }).promise;
+    for (let i = 1; i <= pdfDoc.numPages; i++) {
+      $('pStatus').textContent = 'Leyendo hoja ' + i + ' de ' + pdfDoc.numPages;
+      const page = await pdfDoc.getPage(i);
+      let nums = [];
+      try { const tc = await page.getTextContent();
+        // numero de hoja del rotulo: los textos "E-n" de mayor tamano de letra (el indice usa letra pequena)
+        const hits = tc.items.filter(t => /^E-\d{1,2}$/.test((t.str || '').trim())).map(t => ({ n: +t.str.trim().slice(2), h: Math.abs(t.height || Math.hypot(t.transform[2], t.transform[3]) || 0) }));
+        const hmax = Math.max(0, ...hits.map(h => h.h));
+        nums = [...new Set(hits.filter(h => h.h >= 0.8 * hmax).map(h => h.n))].sort((a, b) => a - b); } catch(e) {}
+      plist.push({ i, nums, page });
+    }
+    plist.sort((a, b) => (a.nums.length ? a.nums[0] : -1) - (b.nums.length ? b.nums[0] : -1));
+    buildGrid();
+    $('pStatus').textContent = plist.length + ' pliegos. Toca uno para verlo.';
+  } catch(e) {
+    console.error(e);
+    $('pStatus').innerHTML = 'No se pudieron cargar los planos: ' + esc(e.message || e) + '. Revisa que el archivo se llame <b>planos.pdf</b> y esté junto a index.html.';
+  }
+}
+const label = p => p.nums.length ? p.nums.map(n => 'E-' + n).join(' · ') : 'Portada';
+const desc = p => p.nums.length ? p.nums.map(n => INDEX[n]).filter(Boolean).join(' / ') : 'Datos del proyecto y código QR';
+async function buildGrid(){
+  const g = $('pGrid'); g.innerHTML = '';
+  const cards = plist.map((p, k) => {
+    const b = document.createElement('button'); b.className = 'card';
+    b.innerHTML = '<canvas></canvas><div class="ct"><div class="cn">' + label(p) + '</div><div class="cd">' + esc(desc(p)) + '</div></div>';
+    b.onclick = () => showPage(k); g.appendChild(b); return b.querySelector('canvas');
+  });
+  for (let k = 0; k < plist.length; k++) {
+    const p = plist[k], vp0 = p.page.getViewport({ scale: 1 });
+    const vp = p.page.getViewport({ scale: 480 / vp0.width });
+    const c = cards[k]; c.width = vp.width; c.height = vp.height;
+    try { await p.page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise; } catch(e) {}
+  }
+}
+function showGrid(){ $('pView').hidden = true; $('pGrid').hidden = false; $('pBack').hidden = true; $('pCtl').hidden = true; $('pStatus').hidden = false; $('pTitle').textContent = 'Planos estructurales'; cur = -1; }
+function showPage(k){
+  cur = k; zoom = 1;
+  $('pGrid').hidden = true; $('pStatus').hidden = true; $('pView').hidden = false; $('pBack').hidden = false; $('pCtl').hidden = false;
+  $('pTitle').textContent = label(plist[k]);
+  $('pOpen').href = PDF_URL + '#page=' + plist[k].i;
+  renderPage();
+}
+function setZoom(z){ const box = $('pView'); const cx = (box.scrollLeft + box.clientWidth / 2) / box.scrollWidth, cy = (box.scrollTop + box.clientHeight / 2) / box.scrollHeight;
+  zoom = Math.max(1, z); renderPage().then(() => { box.scrollLeft = cx * box.scrollWidth - box.clientWidth / 2; box.scrollTop = cy * box.scrollHeight - box.clientHeight / 2; }); }
+async function renderPage(){
+  const p = plist[cur], box = $('pView'), c = $('pCanvas');
+  const vp0 = p.page.getViewport({ scale: 1 });
+  const fit = (box.clientWidth - 24) / vp0.width;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  let css = fit * zoom;
+  const maxCss = Math.sqrt(MAX_PIX / (vp0.width * vp0.height)) / dpr;
+  if (css > maxCss) { css = maxCss; zoom = css / fit; }
+  const vp = p.page.getViewport({ scale: css * dpr });
+  if (rtask) { try { rtask.cancel(); } catch(e) {} }
+  c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+  c.style.width = Math.floor(vp.width / dpr) + 'px'; c.style.height = Math.floor(vp.height / dpr) + 'px';
+  rtask = p.page.render({ canvasContext: c.getContext('2d'), viewport: vp });
+  try { await rtask.promise; } catch(e) {}
+}
+// arrastrar para desplazar el plano con el mouse
+(() => { const box = $('pView'); let d = null;
+  box.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') return; d = [e.clientX, e.clientY, box.scrollLeft, box.scrollTop]; box.style.cursor = 'grabbing'; });
+  addEventListener('pointermove', e => { if (!d) return; box.scrollLeft = d[2] - (e.clientX - d[0]); box.scrollTop = d[3] - (e.clientY - d[1]); });
+  addEventListener('pointerup', () => { d = null; box.style.cursor = ''; });
+  box.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.25 : 0.8)); }, { passive: false });
+})();
 
 main().catch(fail);
 </script>
