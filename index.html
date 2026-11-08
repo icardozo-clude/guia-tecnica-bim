@@ -25,7 +25,7 @@
   button:hover{border-color:var(--accent)}
   #view{position:absolute;inset:0}
   canvas{display:block;touch-action:none}
-  #panel{position:absolute;z-index:4;top:66px;left:12px;width:250px;max-height:calc(100% - 80px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+  #panel{position:absolute;z-index:4;top:66px;left:12px;width:300px;max-height:calc(100% - 80px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
   #panel h2{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:4px 0 8px}
   .cat{display:flex;align-items:center;gap:8px;padding:4px 0}
   .cat input{width:18px;height:18px;accent-color:var(--accent)}
@@ -34,6 +34,14 @@
   .row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px}
   input[type=range]{width:100%;accent-color:var(--accent)}
   .small{font-size:12px;color:var(--muted)}
+  select,input[type=search]{width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--chip);color:var(--ink);margin-bottom:6px}
+  #fList{max-height:38vh;overflow:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:6px}
+  .fr{display:flex;align-items:center;gap:6px;padding:4px 6px;border-top:1px solid var(--line);font-size:13px}
+  .fr:first-child{border-top:0}
+  .fr input{width:16px;height:16px;accent-color:var(--accent)}
+  .fr .fl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fr .fn{color:var(--muted);font-size:11px}
+  .fr button{padding:2px 7px}
   #info{position:absolute;z-index:4;right:12px;top:66px;width:300px;max-height:calc(100% - 80px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;display:none}
   #info h3{margin:0 0 4px;font-size:14px;color:var(--accent)}
   #info table{width:100%;border-collapse:collapse;font-size:12px}
@@ -97,6 +105,12 @@
   <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><h2>Elementos</h2><button id="closePanel" class="onlym">Cerrar</button></div>
   <div id="cats"></div>
   <div class="row"><button id="allOn">Ver todo</button><button id="allOff">Ocultar todo</button></div>
+  <h2>Filtro por elemento</h2>
+  <select id="fCat" aria-label="Grupo de elementos"></select>
+  <input id="fSearch" type="search" placeholder="Buscar, por ejemplo VC-A" aria-label="Buscar elemento">
+  <div class="row"><button id="fAll">Mostrar todos</button><button id="fNone">Ocultar todos</button><button id="fReset">Restablecer</button></div>
+  <div id="fList"></div>
+  <p class="small">Marca la casilla para mostrar u ocultar. El botón ◎ deja visible solo ese elemento (y su acero, si la partición tiene el mismo nombre) y lo acerca.</p>
   <h2>Corte por altura</h2>
   <input id="clip" type="range" min="0" max="1000" value="1000" aria-label="Altura del corte">
   <div class="small" id="clipTxt">Sin corte</div>
@@ -170,11 +184,11 @@ const decodeIfc = s => String(s || '').replace(/\\X\\([0-9A-F]{2})/gi, (m, h) =>
 function classify(id){
   let code = null; try { code = api.GetLineType(modelID, id); } catch(e) {}
   const byType = typeToCat[code] || 'otr';
-  if (byType === 'ace' || byType === 'mur' || byType === 'col') return byType;
   let name = '';
-  try { const l = api.GetLine(modelID, id, false); name = decodeIfc((l.Name && l.Name.value) || '') + ' ' + decodeIfc((l.ObjectType && l.ObjectType.value) || ''); } catch(e) {}
-  for (const [re, c] of RULES) if (re.test(name)) return c;
-  return byType;
+  try { const l = api.GetLine(modelID, id, false); name = decodeIfc((l.Name && l.Name.value) || ''); } catch(e) {}
+  if (byType === 'ace' || byType === 'mur' || byType === 'col') return { cat: byType, name };
+  for (const [re, c] of RULES) if (re.test(name)) return { cat: c, name };
+  return { cat: byType, name };
 }
 const typeToCat = {};
 const coarse = matchMedia('(pointer:coarse)').matches;
@@ -204,7 +218,10 @@ setInterval(() => needs = true, 500);
 // ---------- carga ----------
 let modelID = null;
 const groups = {};          // cat -> {mesh, ids(Int32Array por triangulo)}
-const ranges = new Map();   // expressID -> [{cat, start, count}] (en vertices)
+const ranges = new Map();
+const elems = new Map();    // expressID -> {cat, name}
+const marks = new Map();    // expressID -> {marca, part}
+const hidden = new Set();   // elementos ocultos por el filtro   // expressID -> [{cat, start, count}] (en vertices)
 let box = new THREE.Box3();
 
 async function fetchWithProgress(url){
@@ -217,8 +234,26 @@ async function fetchWithProgress(url){
   const out = new Uint8Array(got); let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; } return out;
 }
 
+function readMarks(data){
+  try {
+    const s = new TextDecoder('latin1').decode(data);
+    const P = new Map(), S = new Map();
+    for (const m of s.matchAll(/#(\d+)= ?IFCPROPERTYSINGLEVALUE\('(Marca|Mark|Partici\\X\\F3n|Partition)',\$,IFC[A-Z]+\('([^']*)'\),\$\);/g))
+      P.set(m[1], [/^Mar/.test(m[2]) ? 'marca' : 'part', decodeIfc(m[3])]);
+    for (const m of s.matchAll(/#(\d+)= ?IFCPROPERTYSET\([^\n]*?\(([#\d,]+)\)\);/g)) {
+      const hit = m[2].split(',').map(x => x.replace('#', '')).filter(x => P.has(x)).map(x => P.get(x));
+      if (hit.length) S.set(m[1], hit);
+    }
+    for (const m of s.matchAll(/#(\d+)= ?IFCRELDEFINESBYPROPERTIES\([^\n]*?\(([#\d,]+)\),#(\d+)\);/g)) {
+      const hit = S.get(m[3]); if (!hit) continue;
+      for (const o of m[2].split(',')) { const id = +o.replace('#', ''); const r = marks.get(id) || {}; for (const [k, v] of hit) if (v) r[k] = v; marks.set(id, r); }
+    }
+  } catch(e) { console.warn('marcas', e); }
+}
+
 async function main(){
   const data = await fetchWithProgress(MODEL_URL);
+  readMarks(data);
   const errs = [];
   for (const ver of IFC_VERSIONS) {
     try {
@@ -242,7 +277,8 @@ async function main(){
   let count = 0;
   api.StreamAllMeshes(modelID, mesh => {
     const id = mesh.expressID;
-    const cat = classify(id);
+    const cl = classify(id), cat = cl.cat;
+    if (!elems.has(id)) elems.set(id, { cat, name: cl.name });
     const A = acc[cat];
     const pgs = mesh.geometries;
     for (let i = 0; i < pgs.size(); i++) {
@@ -284,6 +320,7 @@ async function main(){
     acc[c.key] = null;
   }
   buildCats(ids);
+  buildFilter();
   setupClip();
   setView('3d');
   $('loader').style.display = 'none';
@@ -296,15 +333,88 @@ function buildCats(ids){
   for (const c of CATS) {
     if (!groups[c.key]) continue;
     const row = document.createElement('label'); row.className = 'cat';
-    row.innerHTML = `<input type="checkbox" ${groups[c.key].mesh.visible ? 'checked' : ''}><span class="sw" style="background:${c.color}"></span><span>${c.name}</span><span class="n">${ids[c.key]}</span>`;
+    row.innerHTML = `<input type="checkbox" id="cat-${c.key}" ${groups[c.key].mesh.visible ? 'checked' : ''}><span class="sw" style="background:${c.color}"></span><span>${c.name}</span><span class="n">${ids[c.key]}</span>`;
     row.querySelector('input').addEventListener('change', e => { groups[c.key].mesh.visible = e.target.checked; if (!e.target.checked && sel && sel.cat === c.key) clearSel(); needs = true; });
     wrap.appendChild(row);
   }
 }
-$('allOn').onclick = () => { for (const k in groups) groups[k].mesh.visible = true; document.querySelectorAll('#cats input').forEach(i => i.checked = true); needs = true; };
+$('allOn').onclick = () => { hidden.clear(); for (const k in groups) { applyHidden(k); groups[k].mesh.visible = true; } drawList(); document.querySelectorAll('#cats input').forEach(i => i.checked = true); needs = true; };
 $('allOff').onclick = () => { for (const k in groups) groups[k].mesh.visible = false; document.querySelectorAll('#cats input').forEach(i => i.checked = false); clearSel(); needs = true; };
 const togglePanel = () => { const o = $('panel').classList.toggle('open'); $('fab').style.display = o ? 'none' : ''; };
 $('togglePanel').onclick = togglePanel; $('fab').onclick = togglePanel; $('closePanel').onclick = togglePanel;
+
+// ---------- filtro por elemento ----------
+const coll = new Intl.Collator('es', { numeric: true });
+let fgroups = {};   // cat -> [{key, label, ids:[]}]
+function labelOf(id){
+  const e = elems.get(id) || {}, m = marks.get(id) || {};
+  if (e.cat === 'ace') return m.part ? 'Acero ' + m.part : 'Sin partición · ' + ((e.name || '').split(':')[1] || 'acero');
+  if (m.marca) return m.marca;
+  const p = (e.name || '').split(':');
+  return (p.length > 1 ? p[1] : (p[0] || 'Elemento')) + ' · ' + (p[2] || id);
+}
+function buildFilter(){
+  fgroups = {};
+  for (const [id, e] of elems) {
+    if (!ranges.has(id)) continue;
+    const lab = labelOf(id); const g = (fgroups[e.cat] = fgroups[e.cat] || new Map());
+    if (!g.has(lab)) g.set(lab, { label: lab, ids: [] }); g.get(lab).ids.push(id);
+  }
+  for (const k in fgroups) fgroups[k] = [...fgroups[k].values()].sort((a, b) => coll.compare(a.label, b.label));
+  const sel = $('fCat'); sel.innerHTML = '';
+  for (const c of CATS) if (fgroups[c.key]) sel.add(new Option(c.name + ' (' + fgroups[c.key].length + ')', c.key));
+  sel.value = fgroups.cim ? 'cim' : sel.options[0] && sel.options[0].value;
+  sel.onchange = drawList; $('fSearch').oninput = drawList;
+  drawList();
+}
+function drawList(){
+  const cat = $('fCat').value, q = $('fSearch').value.trim().toLowerCase(), list = $('fList'); list.innerHTML = '';
+  for (const g of (fgroups[cat] || [])) {
+    if (q && !g.label.toLowerCase().includes(q)) continue;
+    const r = document.createElement('div'); r.className = 'fr';
+    const on = g.ids.some(id => !hidden.has(id));
+    r.innerHTML = `<input type="checkbox" ${on ? 'checked' : ''}><span class="fl" title="${esc(g.label)}">${esc(g.label)}</span><span class="fn">${g.ids.length > 1 ? g.ids.length : ''}</span><button title="Ver solo este">◎</button>`;
+    r.querySelector('input').onchange = e => { for (const id of g.ids) e.target.checked ? hidden.delete(id) : hidden.add(id); if (e.target.checked) setCat(cat, true); applyHidden(cat); };
+    r.querySelector('button').onclick = () => isolate(cat, g);
+    list.appendChild(r);
+  }
+  if (!list.children.length) list.innerHTML = '<div class="fr small">Sin resultados</div>';
+}
+function setCat(key, v){ if (!groups[key]) return; groups[key].mesh.visible = v; const cb = $('cat-' + key); if (cb) cb.checked = v; }
+function applyHidden(cat){
+  const g = groups[cat]; if (!g) return; const geo = g.mesh.geometry;
+  let any = false; for (const id of hidden) { const e = elems.get(id); if (e && e.cat === cat) { any = true; break; } }
+  if (!any) { geo.setIndex(null); needs = true; return; }
+  const idx = [];
+  for (const [id, rs] of ranges) { if (hidden.has(id)) continue; for (const r of rs) if (r.cat === cat) for (let i = r.start; i < r.start + r.count; i++) idx.push(i); }
+  geo.setIndex(idx.length ? idx : [0, 0, 0]);
+  if (sel && hidden.has(sel.id)) clearSel();
+  needs = true;
+}
+function setGroupHidden(cat, hide){ for (const g of (fgroups[cat] || [])) for (const id of g.ids) hide ? hidden.add(id) : hidden.delete(id); applyHidden(cat); }
+$('fAll').onclick = () => { const c = $('fCat').value; setGroupHidden(c, false); setCat(c, true); drawList(); };
+$('fNone').onclick = () => { const c = $('fCat').value; setGroupHidden(c, true); drawList(); };
+$('fReset').onclick = () => { hidden.clear(); for (const k in groups) { applyHidden(k); setCat(k, visibleDefault[k] !== undefined ? visibleDefault[k] : true); } clearSel(); drawList(); setView('3d'); };
+function isolate(cat, g){
+  hidden.clear();
+  const keep = new Set(g.ids);
+  // acero con la misma particion que la marca del elemento (p. ej. VC-A)
+  const mk = (marks.get(g.ids[0]) || {}).marca;
+  const steel = mk && cat !== 'ace' ? (fgroups.ace || []).find(a => a.label === 'Acero ' + mk) : null;
+  if (steel) steel.ids.forEach(id => keep.add(id));
+  for (const [id, e] of elems) if (!keep.has(id)) hidden.add(id);
+  for (const k in groups) { setCat(k, k === cat || (steel && k === 'ace')); applyHidden(k); }
+  const b = new THREE.Box3(), v = new THREE.Vector3();
+  for (const id of keep) for (const r of (ranges.get(id) || [])) { const a = groups[r.cat].mesh.geometry.attributes.position.array; for (let i = r.start; i < r.start + r.count; i++) b.expandByPoint(v.set(a[i*3], a[i*3+1], a[i*3+2])); }
+  if (!b.isEmpty()) fitTo(b);
+  drawList();
+  if ($('panel').classList.contains('open') && matchMedia('(max-width:760px)').matches) togglePanel();
+}
+function fitTo(b){
+  const c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3()); const d = Math.max(s.x, s.y, s.z, 0.5) * 2.2;
+  camera.position.copy(c).add(new THREE.Vector3(1, 0.8, 1.2).normalize().multiplyScalar(d)); camera.near = d / 500; camera.far = d * 50; camera.updateProjectionMatrix();
+  controls.target.copy(c); controls.update(); needs = true;
+}
 
 function setupClip(){
   const s = $('clip');
@@ -340,8 +450,9 @@ renderer.domElement.addEventListener('pointerup', e => {
   const meshes = Object.values(groups).map(g => g.mesh).filter(m => m.visible);
   const hits = ray.intersectObjects(meshes, false).filter(h => clipPlane.distanceToPoint(h.point) >= 0);
   if (!hits.length) { clearSel(); return; }
-  const h = hits[0]; const cat = h.object.userData.cat;
-  pick(groups[cat].ids[h.faceIndex], cat);
+  const h = hits[0]; const cat = h.object.userData.cat; const geo = h.object.geometry;
+  const vi = geo.index ? geo.index.getX(h.faceIndex * 3) : h.faceIndex * 3;
+  pick(groups[cat].ids[Math.floor(vi / 3)], cat);
 });
 function clearSel(){ if (sel) { scene.remove(sel.mesh); sel.mesh.geometry.dispose(); sel = null; } $('info').style.display = 'none'; needs = true; }
 $('closeInfo').onclick = clearSel;
