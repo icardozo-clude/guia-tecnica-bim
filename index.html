@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Modelo BIM estructural · Guía técnica</title>
+<meta name="description" content="Visor 3D del modelo BIM estructural de la guía técnica de mampostería confinada en ladera (Juan Rey, Bogotá).">
+<style>
+  :root{
+    --bg:#eef1f4; --panel:#ffffff; --ink:#1d2733; --muted:#5c6b7a; --line:#d9dee4;
+    --accent:#1f3864; --accent2:#c0504d; --chip:#f3f5f8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){--bg:#15191e;--panel:#1e242b;--ink:#e6eaef;--muted:#9aa7b4;--line:#2f3741;--accent:#8fb0e8;--accent2:#ff8a80;--chip:#262d35;}
+  }
+  :root[data-theme="dark"]{--bg:#15191e;--panel:#1e242b;--ink:#e6eaef;--muted:#9aa7b4;--line:#2f3741;--accent:#8fb0e8;--accent2:#ff8a80;--chip:#262d35;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;overflow:hidden}
+  header{position:absolute;top:0;left:0;right:0;z-index:5;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center}
+  header .t{flex:1;min-width:0}
+  header h1{margin:0;font-size:15px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  header p{margin:2px 0 0;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #togglePanel{display:none}
+  button{font:inherit;border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:8px;padding:6px 10px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  #view{position:absolute;inset:0}
+  canvas{display:block;touch-action:none}
+  #panel{position:absolute;z-index:4;top:66px;left:12px;width:250px;max-height:calc(100% - 80px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+  #panel h2{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:4px 0 8px}
+  .cat{display:flex;align-items:center;gap:8px;padding:4px 0}
+  .cat input{width:18px;height:18px;accent-color:var(--accent)}
+  .cat .sw{width:12px;height:12px;border-radius:3px;border:1px solid var(--line)}
+  .cat .n{margin-left:auto;color:var(--muted);font-size:12px}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .small{font-size:12px;color:var(--muted)}
+  #info{position:absolute;z-index:4;right:12px;top:66px;width:300px;max-height:calc(100% - 80px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;display:none}
+  #info h3{margin:0 0 4px;font-size:14px;color:var(--accent)}
+  #info table{width:100%;border-collapse:collapse;font-size:12px}
+  #info td{border-top:1px solid var(--line);padding:3px 4px;vertical-align:top}
+  #info td:first-child{color:var(--muted);width:45%}
+  #info .ps{margin:8px 0 2px;font-weight:600;font-size:12px}
+  #loader{position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+  #loader .box{width:min(360px,calc(100% - 32px));text-align:center}
+  #bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:12px 0 6px}
+  #bar div{height:100%;width:0;background:var(--accent);transition:width .2s}
+  #hint{position:absolute;z-index:3;left:50%;bottom:12px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;font-size:12px;color:var(--muted);white-space:nowrap}
+  @media (max-width:760px){
+    header{padding:8px 16px}
+    header p{display:none}
+    #togglePanel{display:inline-block}
+    #panel{top:auto;bottom:0;left:0;right:0;width:auto;max-height:45%;border-radius:12px 12px 0 0;display:none}
+    #panel.open{display:block}
+    #info{top:auto;bottom:0;left:0;right:0;width:auto;max-height:45%;border-radius:12px 12px 0 0}
+    #hint{display:none}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="t">
+    <h1>Guía técnica · Vivienda de dos pisos en mampostería confinada en ladera</h1>
+    <p>Modelo BIM estructural · Juan Rey (La Paz), Bogotá · Iván Camilo Cardoso Valbuena · Director: Ing. Carlos Ortiz Mesa · Universidad Colegio Mayor de Cundinamarca</p>
+  </div>
+  <button id="togglePanel" aria-label="Mostrar opciones">Opciones</button>
+</header>
+<div id="view"></div>
+
+<aside id="panel">
+  <h2>Elementos</h2>
+  <div id="cats"></div>
+  <div class="row"><button id="allOn">Ver todo</button><button id="allOff">Ocultar todo</button></div>
+  <h2>Corte por altura</h2>
+  <input id="clip" type="range" min="0" max="1000" value="1000" aria-label="Altura del corte">
+  <div class="small" id="clipTxt">Sin corte</div>
+  <h2 style="margin-top:12px">Vista</h2>
+  <div class="row"><button id="v3d">3D</button><button id="vTop">Planta</button><button id="vFront">Fachada</button><button id="vSide">Lateral</button></div>
+  <p class="small">Toca o haz clic en un elemento para ver sus datos. Niveles de los planos: N ±0,00 en la cara superior del recebo de la zona baja.</p>
+</aside>
+
+<aside id="info"><button id="closeInfo" style="float:right">Cerrar</button><h3 id="infoT"></h3><div id="infoB"></div></aside>
+<div id="hint">Arrastra para girar · rueda o pellizco para acercar · clic derecho o dos dedos para desplazar</div>
+
+<div id="loader"><div class="box">
+  <strong>Cargando el modelo…</strong>
+  <div id="bar"><div></div></div>
+  <div class="small" id="ltxt">Preparando el visor</div>
+</div></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "web-ifc": "https://cdn.jsdelivr.net/npm/web-ifc@0.0.57/web-ifc-api.js"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as WebIFC from 'web-ifc';
+
+const MODEL_URL = 'modelo.ifc';
+const WASM_PATH = 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.57/';
+const $ = id => document.getElementById(id);
+const setLoad = (p, t) => { $('bar').firstElementChild.style.width = (p*100).toFixed(0)+'%'; if (t) $('ltxt').textContent = t; };
+const fail = e => { console.error(e); $('ltxt').textContent = 'No se pudo cargar el modelo: ' + (e && e.message ? e.message : e); $('bar').style.display='none'; };
+
+// ---------- categorias ----------
+const CATS = [
+  { key:'cim',   name:'Cimentación y ciclópeo', color:'#9e9e9e', types:['IFCFOOTING'] },
+  { key:'vig',   name:'Vigas',                  color:'#b0b7bf', types:['IFCBEAM'] },
+  { key:'col',   name:'Columnetas',             color:'#b0b7bf', types:['IFCCOLUMN'] },
+  { key:'mur',   name:'Muros',                  color:'#b5654a', types:['IFCWALL','IFCWALLSTANDARDCASE'] },
+  { key:'pla',   name:'Placas y losas',         color:'#c9ced4', types:['IFCSLAB'] },
+  { key:'cub',   name:'Cubierta',               color:'#7b8f6a', types:['IFCROOF','IFCCOVERING','IFCMEMBER','IFCPLATE'] },
+  { key:'ace',   name:'Acero de refuerzo',      color:'#d32f2f', types:['IFCREINFORCINGBAR','IFCREINFORCINGMESH'] },
+  { key:'otr',   name:'Otros',                  color:'#bdbdbd', types:[] },
+];
+const typeToCat = {};
+for (const c of CATS) for (const t of c.types) if (WebIFC[t] !== undefined) typeToCat[WebIFC[t]] = c.key;
+const coarse = matchMedia('(pointer:coarse)').matches;
+const visibleDefault = { ace: !coarse };
+
+// ---------- escena ----------
+const view = $('view');
+const renderer = new THREE.WebGLRenderer({ antialias: !coarse });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.localClippingEnabled = true;
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const bgColor = () => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#eef1f4';
+scene.background = new THREE.Color(bgColor());
+const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 2000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f96, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(5, 10, 7); scene.add(sun);
+const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6);
+function resize(){ const w = view.clientWidth, h = view.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+let needs = true; controls.addEventListener('change', () => needs = true);
+(function loop(){ requestAnimationFrame(loop); controls.update(); if (needs) { renderer.render(scene, camera); needs = false; } })();
+setInterval(() => needs = true, 500);
+
+// ---------- carga ----------
+const api = new WebIFC.IfcAPI();
+let modelID = null;
+const groups = {};          // cat -> {mesh, ids(Int32Array por triangulo)}
+const ranges = new Map();   // expressID -> [{cat, start, count}] (en vertices)
+let box = new THREE.Box3();
+
+async function fetchWithProgress(url){
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('no se encontró ' + url + ' (' + r.status + ')');
+  const total = +r.headers.get('content-length') || 0;
+  const reader = r.body.getReader(); const chunks = []; let got = 0;
+  for(;;){ const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length;
+    setLoad(total ? 0.6 * got / total : 0.3, 'Descargando ' + (got/1048576).toFixed(1) + (total ? ' de ' + (total/1048576).toFixed(1) : '') + ' MB'); }
+  const out = new Uint8Array(got); let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; } return out;
+}
+
+async function main(){
+  api.SetWasmPath(WASM_PATH, true);
+  await api.Init();
+  const data = await fetchWithProgress(MODEL_URL);
+  setLoad(0.65, 'Leyendo el IFC');
+  await new Promise(r => setTimeout(r, 30));
+  modelID = api.OpenModel(data, { COORDINATE_TO_ORIGIN: true });
+
+  const acc = {};  // cat -> {pos:[], nor:[], col:[], ids:[]}
+  for (const c of CATS) acc[c.key] = { pos:[], nor:[], col:[], ids:[], nv:0 };
+  const m = new THREE.Matrix4(), nm = new THREE.Matrix3(), v = new THREE.Vector3(), n = new THREE.Vector3();
+  let count = 0;
+  api.StreamAllMeshes(modelID, mesh => {
+    const id = mesh.expressID;
+    let cat = 'otr';
+    try { cat = typeToCat[api.GetLineType(modelID, id)] || 'otr'; } catch(e) {}
+    const A = acc[cat];
+    const pgs = mesh.geometries;
+    for (let i = 0; i < pgs.size(); i++) {
+      const pg = pgs.get(i);
+      const g = api.GetGeometry(modelID, pg.geometryExpressID);
+      const vs = api.GetVertexArray(g.GetVertexData(), g.GetVertexDataSize());
+      const ix = api.GetIndexArray(g.GetIndexData(), g.GetIndexDataSize());
+      m.fromArray(pg.flatTransformation); nm.getNormalMatrix(m);
+      const col = pg.color; const base = A.nv; const start = A.ids.length * 3;
+      for (let k = 0; k < ix.length; k++) {
+        const j = ix[k] * 6;
+        v.set(vs[j], vs[j+1], vs[j+2]).applyMatrix4(m);
+        n.set(vs[j+3], vs[j+4], vs[j+5]).applyMatrix3(nm).normalize();
+        A.pos.push(v.x, v.y, v.z); A.nor.push(n.x, n.y, n.z); A.col.push(col.x, col.y, col.z);
+        box.expandByPoint(v);
+      }
+      for (let k = 0; k < ix.length / 3; k++) A.ids.push(id);
+      A.nv += ix.length;
+      if (!ranges.has(id)) ranges.set(id, []);
+      ranges.get(id).push({ cat, start, count: ix.length });
+      if (g.delete) g.delete();
+    }
+    if (++count % 200 === 0) setLoad(0.65 + 0.3 * Math.min(1, count / 4000), 'Construyendo la geometría (' + count + ' elementos)');
+  });
+
+  const ids = {};
+  for (const c of CATS) {
+    const A = acc[c.key]; if (!A.pos.length) continue;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(A.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(A.nor, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(A.col, 3));
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, clippingPlanes: [clipPlane] });
+    const mesh = new THREE.Mesh(geo, mat); mesh.userData.cat = c.key;
+    mesh.visible = visibleDefault[c.key] !== undefined ? visibleDefault[c.key] : true;
+    scene.add(mesh);
+    groups[c.key] = { mesh, ids: Int32Array.from(A.ids) };
+    ids[c.key] = new Set(A.ids).size;
+    acc[c.key] = null;
+  }
+  buildCats(ids);
+  setupClip();
+  setView('3d');
+  $('loader').style.display = 'none';
+  needs = true;
+}
+
+// ---------- panel ----------
+function buildCats(ids){
+  const wrap = $('cats'); wrap.innerHTML = '';
+  for (const c of CATS) {
+    if (!groups[c.key]) continue;
+    const row = document.createElement('label'); row.className = 'cat';
+    row.innerHTML = `<input type="checkbox" ${groups[c.key].mesh.visible ? 'checked' : ''}><span class="sw" style="background:${c.color}"></span><span>${c.name}</span><span class="n">${ids[c.key]}</span>`;
+    row.querySelector('input').addEventListener('change', e => { groups[c.key].mesh.visible = e.target.checked; if (!e.target.checked && sel && sel.cat === c.key) clearSel(); needs = true; });
+    wrap.appendChild(row);
+  }
+}
+$('allOn').onclick = () => { for (const k in groups) groups[k].mesh.visible = true; document.querySelectorAll('#cats input').forEach(i => i.checked = true); needs = true; };
+$('allOff').onclick = () => { for (const k in groups) groups[k].mesh.visible = false; document.querySelectorAll('#cats input').forEach(i => i.checked = false); clearSel(); needs = true; };
+$('togglePanel').onclick = () => $('panel').classList.toggle('open');
+
+function setupClip(){
+  const s = $('clip');
+  const f = () => {
+    const t = +s.value / 1000;
+    if (t >= 0.999) { clipPlane.constant = 1e6; $('clipTxt').textContent = 'Sin corte'; }
+    else { const y = box.min.y + t * (box.max.y - box.min.y); clipPlane.constant = y; $('clipTxt').textContent = 'Corte a ' + (y - box.min.y).toFixed(2).replace('.', ',') + ' m desde la base del modelo'; }
+    needs = true;
+  };
+  s.addEventListener('input', f); f();
+}
+
+function setView(k){
+  const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+  const d = Math.max(s.x, s.y, s.z) * 1.6;
+  const dirs = { '3d': [1, 0.8, 1.2], top: [0, 1, 0.0001], front: [0, 0.15, 1], side: [1, 0.15, 0] };
+  const v = new THREE.Vector3(...dirs[k]).normalize().multiplyScalar(d);
+  camera.position.copy(c).add(v); camera.near = d / 500; camera.far = d * 20; camera.updateProjectionMatrix();
+  controls.target.copy(c); controls.update(); needs = true;
+}
+$('v3d').onclick = () => setView('3d'); $('vTop').onclick = () => setView('top');
+$('vFront').onclick = () => setView('front'); $('vSide').onclick = () => setView('side');
+
+// ---------- seleccion ----------
+const ray = new THREE.Raycaster(); const ptr = new THREE.Vector2();
+let sel = null; let downAt = null;
+renderer.domElement.addEventListener('pointerdown', e => downAt = [e.clientX, e.clientY]);
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ptr, camera);
+  const meshes = Object.values(groups).map(g => g.mesh).filter(m => m.visible);
+  const hits = ray.intersectObjects(meshes, false).filter(h => clipPlane.distanceToPoint(h.point) >= 0);
+  if (!hits.length) { clearSel(); return; }
+  const h = hits[0]; const cat = h.object.userData.cat;
+  pick(groups[cat].ids[h.faceIndex], cat);
+});
+function clearSel(){ if (sel) { scene.remove(sel.mesh); sel.mesh.geometry.dispose(); sel = null; } $('info').style.display = 'none'; needs = true; }
+$('closeInfo').onclick = clearSel;
+
+function pick(id, cat){
+  clearSel();
+  const src = groups[cat].mesh.geometry.attributes.position.array;
+  const parts = (ranges.get(id) || []).filter(p => p.cat === cat);
+  const n = parts.reduce((a, p) => a + p.count, 0);
+  const pos = new Float32Array(n * 3); let o = 0;
+  for (const p of parts) { pos.set(src.subarray(p.start * 3, (p.start + p.count) * 3), o); o += p.count * 3; }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.computeVertexNormals();
+  const mat = new THREE.MeshBasicMaterial({ color: 0xff9800, transparent: true, opacity: 0.85, depthTest: false, clippingPlanes: [clipPlane] });
+  const mesh = new THREE.Mesh(geo, mat); mesh.renderOrder = 10; scene.add(mesh);
+  sel = { id, cat, mesh };
+  showInfo(id);
+  needs = true;
+}
+
+const val = x => (x && typeof x === 'object' && 'value' in x) ? x.value : x;
+const fmt = x => { x = val(x); if (typeof x === 'number') return (Math.round(x * 1000) / 1000).toString().replace('.', ','); return x == null ? '' : String(x); };
+const esc = s => String(s).replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+async function showInfo(id){
+  $('info').style.display = 'block'; $('infoT').textContent = 'Elemento ' + id; $('infoB').innerHTML = '<p class="small">Leyendo propiedades…</p>';
+  try {
+    let it = null; try { it = await api.properties.getItemProperties(modelID, id, false); } catch(e) { it = api.GetLine(modelID, id); }
+    const cname = (CATS.find(c => c.key === sel.cat) || {}).name || '';
+    const title = fmt(it.Name) || cname;
+    $('infoT').textContent = title;
+    let h = '<table>';
+    const row = (k, v) => { if (v !== '' && v != null) h += `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`; };
+    row('Categoría', cname); row('Tipo', fmt(it.ObjectType)); row('Etiqueta (ID de Revit)', fmt(it.Tag)); row('Descripción', fmt(it.Description));
+    h += '</table>';
+    let psets = [];
+    try { psets = await api.properties.getPropertySets(modelID, id, true); } catch(e) {}
+    for (const ps of psets || []) {
+      const props = (ps.HasProperties || ps.Quantities || []).filter(Boolean);
+      if (!props.length) continue;
+      h += `<div class="ps">${esc(fmt(ps.Name) || 'Propiedades')}</div><table>`;
+      for (const p of props) {
+        const v = p.NominalValue ?? p.LengthValue ?? p.AreaValue ?? p.VolumeValue ?? p.CountValue ?? p.WeightValue;
+        row(fmt(p.Name), fmt(v));
+      }
+      h += '</table>';
+    }
+    $('infoB').innerHTML = h;
+  } catch(e) { $('infoB').innerHTML = '<p class="small">No se pudieron leer las propiedades.</p>'; console.error(e); }
+}
+
+main().catch(fail);
+</script>
+</body>
+</html>
