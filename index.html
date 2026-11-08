@@ -90,17 +90,16 @@
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-  "web-ifc": "https://cdn.jsdelivr.net/npm/web-ifc@0.0.57/web-ifc-api.js"
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 } }
 </script>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import * as WebIFC from 'web-ifc';
 
 const MODEL_URL = 'modelo.ifc';
-const WASM_PATH = 'https://cdn.jsdelivr.net/npm/web-ifc@0.0.57/';
+const IFC_VERSIONS = ['0.0.68', '0.0.66', '0.0.59', '0.0.57'];   // se prueban en orden
+let WebIFC = null, api = null;
 const $ = id => document.getElementById(id);
 const setLoad = (p, t) => { $('bar').firstElementChild.style.width = (p*100).toFixed(0)+'%'; if (t) $('ltxt').textContent = t; };
 const fail = e => { console.error(e); $('ltxt').textContent = 'No se pudo cargar el modelo: ' + (e && e.message ? e.message : e); $('bar').style.display='none'; };
@@ -117,7 +116,6 @@ const CATS = [
   { key:'otr',   name:'Otros',                  color:'#bdbdbd', types:[] },
 ];
 const typeToCat = {};
-for (const c of CATS) for (const t of c.types) if (WebIFC[t] !== undefined) typeToCat[WebIFC[t]] = c.key;
 const coarse = matchMedia('(pointer:coarse)').matches;
 const visibleDefault = { ace: !coarse };
 
@@ -143,7 +141,6 @@ let needs = true; controls.addEventListener('change', () => needs = true);
 setInterval(() => needs = true, 500);
 
 // ---------- carga ----------
-const api = new WebIFC.IfcAPI();
 let modelID = null;
 const groups = {};          // cat -> {mesh, ids(Int32Array por triangulo)}
 const ranges = new Map();   // expressID -> [{cat, start, count}] (en vertices)
@@ -160,12 +157,23 @@ async function fetchWithProgress(url){
 }
 
 async function main(){
-  api.SetWasmPath(WASM_PATH, true);
-  await api.Init();
   const data = await fetchWithProgress(MODEL_URL);
-  setLoad(0.65, 'Leyendo el IFC');
-  await new Promise(r => setTimeout(r, 30));
-  modelID = api.OpenModel(data, { COORDINATE_TO_ORIGIN: true });
+  const errs = [];
+  for (const ver of IFC_VERSIONS) {
+    try {
+      setLoad(0.62, 'Leyendo el IFC (lector ' + ver + ')');
+      await new Promise(r => setTimeout(r, 30));
+      const mod = await import('https://cdn.jsdelivr.net/npm/web-ifc@' + ver + '/web-ifc-api.js');
+      const a = new mod.IfcAPI();
+      a.SetWasmPath('https://cdn.jsdelivr.net/npm/web-ifc@' + ver + '/', true);
+      await a.Init(undefined, true);
+      const id = a.OpenModel(data.slice(), { COORDINATE_TO_ORIGIN: true });
+      if (id < 0) throw new Error('el lector no pudo abrir el archivo');
+      WebIFC = mod; api = a; modelID = id; window.__ifcVersion = ver; break;
+    } catch (e) { errs.push(ver + ': ' + (e && e.message ? e.message : e)); console.warn(ver, e); }
+  }
+  if (!api) throw new Error('ninguna versión del lector abrió el modelo. ' + errs.join(' | '));
+  for (const c of CATS) for (const t of c.types) if (WebIFC[t] !== undefined) typeToCat[WebIFC[t]] = c.key;
 
   const acc = {};  // cat -> {pos:[], nor:[], col:[], ids:[]}
   for (const c of CATS) acc[c.key] = { pos:[], nor:[], col:[], ids:[], nv:0 };
