@@ -52,6 +52,13 @@
   #loader .box{width:min(360px,calc(100% - 32px));text-align:center}
   #bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:12px 0 6px}
   #bar div{height:100%;width:0;background:var(--accent);transition:width .2s}
+  .sec{border-top:1px solid var(--line);padding:2px 0}
+  .sec:first-of-type{border-top:0}
+  .sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:8px 0;user-select:none}
+  .sec>summary::-webkit-details-marker{display:none}
+  .sec>summary::after{content:'▾';font-size:14px}
+  .sec:not([open])>summary::after{content:'▸'}
+  .sec>summary:hover{color:var(--accent)}
   #fab{display:none}
   .onlym{display:none}
   #hint{position:absolute;z-index:3;left:50%;bottom:12px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;font-size:12px;color:var(--muted);white-space:nowrap}
@@ -102,21 +109,26 @@
 
 <button id="fab" aria-label="Mostrar capas y opciones">☰ Capas y vistas</button>
 <aside id="panel">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><h2>Elementos</h2><button id="closePanel" class="onlym">Cerrar</button></div>
-  <div id="cats"></div>
-  <div class="row"><button id="allOn">Ver todo</button><button id="allOff">Ocultar todo</button></div>
-  <h2>Filtro por elemento</h2>
-  <select id="fCat" aria-label="Grupo de elementos"></select>
-  <input id="fSearch" type="search" placeholder="Buscar, por ejemplo VC-A" aria-label="Buscar elemento">
-  <div class="row"><button id="fAll">Mostrar todos</button><button id="fNone">Ocultar todos</button><button id="fReset">Restablecer</button></div>
-  <div id="fList"></div>
-  <p class="small">Marca la casilla para mostrar u ocultar. El botón ◎ deja visible solo ese elemento y lo acerca; en las vigas de cimentación muestra también su acero.</p>
-  <h2>Corte por altura</h2>
-  <input id="clip" type="range" min="0" max="1000" value="1000" aria-label="Altura del corte">
-  <div class="small" id="clipTxt">Sin corte</div>
-  <h2 style="margin-top:12px">Vista</h2>
-  <div class="row"><button id="v3d">3D</button><button id="vTop">Planta</button><button id="vFront">Fachada</button><button id="vSide">Lateral</button></div>
-  <p class="small">Toca o haz clic en un elemento para ver sus datos. Niveles de los planos: N ±0,00 en la cara superior del recebo de la zona baja.</p>
+  <div class="onlym" style="text-align:right;margin-bottom:4px"><button id="closePanel">Cerrar</button></div>
+  <details class="sec" open><summary>Elementos</summary>
+    <div id="cats"></div>
+    <div class="row"><button id="allOn">Ver todo</button><button id="allOff">Ocultar todo</button></div>
+  </details>
+  <details class="sec" open><summary>Filtro por elemento</summary>
+    <select id="fCat" aria-label="Grupo de elementos"></select>
+    <input id="fSearch" type="search" placeholder="Buscar, por ejemplo VC-A" aria-label="Buscar elemento">
+    <div class="row"><button id="fAll">Mostrar todos</button><button id="fNone">Ocultar todos</button><button id="fReset">Restablecer</button></div>
+    <div id="fList"></div>
+    <p class="small">Marca la casilla para mostrar u ocultar. El botón ◎ deja visible solo ese elemento y lo acerca; en las vigas de cimentación muestra también su acero.</p>
+  </details>
+  <details class="sec" open><summary>Corte por altura</summary>
+    <input id="clip" type="range" min="0" max="1000" value="1000" aria-label="Altura del corte">
+    <div class="small" id="clipTxt">Sin corte</div>
+  </details>
+  <details class="sec" open><summary>Vista</summary>
+    <div class="row"><button id="v3d">3D</button><button id="vTop">Planta</button><button id="vFront">Fachada</button><button id="vSide">Lateral</button></div>
+    <p class="small">Toca o haz clic en un elemento para ver sus datos. Niveles de los planos: N ±0,00 en la cara superior del recebo de la zona baja.</p>
+  </details>
 </aside>
 
 <aside id="info"><button id="closeInfo" style="float:right">Cerrar</button><h3 id="infoT"></h3><div id="infoB"></div></aside>
@@ -657,6 +669,11 @@ async function renderPage(){
   addEventListener('pointerup', () => { d = null; box.style.cursor = ''; });
   box.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.25 : 0.8)); }, { passive: false });
 })();
+
+document.querySelectorAll('#panel details.sec').forEach((d, i) => {
+  try { const v = localStorage.getItem('sec' + i); if (v !== null) d.open = v === '1'; } catch(e) {}
+  d.addEventListener('toggle', () => { try { localStorage.setItem('sec' + i, d.open ? '1' : '0'); } catch(e) {} });
+});
 
 main().catch(fail);
 </script>
