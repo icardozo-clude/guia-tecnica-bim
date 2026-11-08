@@ -44,6 +44,8 @@
   #loader .box{width:min(360px,calc(100% - 32px));text-align:center}
   #bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:12px 0 6px}
   #bar div{height:100%;width:0;background:var(--accent);transition:width .2s}
+  #fab{display:none}
+  .onlym{display:none}
   #hint{position:absolute;z-index:3;left:50%;bottom:12px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 12px;font-size:12px;color:var(--muted);white-space:nowrap}
   #planos{position:absolute;inset:0;z-index:7;background:var(--bg);display:flex;flex-direction:column}
   #planos[hidden]{display:none}
@@ -51,24 +53,31 @@
   .ptool .sp{flex:1}
   .ptool a{text-decoration:none}
   #pStatus{padding:6px 16px}
+  #pGrid[hidden]{display:none!important}
   #pGrid{flex:1;overflow:auto;padding:8px 16px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;align-content:start}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;text-align:left;padding:0}
+  .card{display:block;color:var(--ink);font:inherit;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;text-align:left;padding:0}
   .card:hover{border-color:var(--accent)}
   .card canvas{display:block;width:100%;height:auto;background:#fff}
   .card .ct{padding:8px 10px}
   .card .cn{font-weight:700;color:var(--accent)}
   .card .cd{font-size:12px;color:var(--muted)}
   #pView{flex:1;overflow:auto;background:#7d8590;cursor:grab;touch-action:pan-x pan-y}
+  #planos:fullscreen{width:100%;height:100%}
   #pView[hidden]{display:none}
   #pView canvas{display:block;margin:12px auto;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.3)}
   @media (max-width:760px){
     header{padding:8px 16px}
     header p{display:none}
     #togglePanel{display:inline-block}
-    #panel{top:auto;bottom:0;left:0;right:0;width:auto;max-height:45%;border-radius:12px 12px 0 0;display:none}
+    .onlym{display:inline-block}
+    #fab{display:block;position:absolute;z-index:4;left:16px;bottom:calc(16px + env(safe-area-inset-bottom));padding:12px 16px;border-radius:24px;font-weight:600;background:var(--accent);color:#fff;border:0;box-shadow:0 2px 10px rgba(0,0,0,.25)}
+    #panel{top:auto;bottom:0;left:0;right:0;width:auto;max-height:60%;border-radius:12px 12px 0 0;display:none;padding-bottom:calc(12px + env(safe-area-inset-bottom));box-shadow:0 -2px 12px rgba(0,0,0,.2)}
+    #panel .cat{padding:8px 0}
     #panel.open{display:block}
     #info{top:auto;bottom:0;left:0;right:0;width:auto;max-height:45%;border-radius:12px 12px 0 0}
     #hint{display:none}
+    .ptool{padding:6px 8px;gap:4px}
+    .ptool button{padding:6px 8px}
   }
 </style>
 </head>
@@ -83,8 +92,9 @@
 </header>
 <div id="view"></div>
 
+<button id="fab" aria-label="Mostrar capas y opciones">☰ Capas y vistas</button>
 <aside id="panel">
-  <h2>Elementos</h2>
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><h2>Elementos</h2><button id="closePanel" class="onlym">Cerrar</button></div>
   <div id="cats"></div>
   <div class="row"><button id="allOn">Ver todo</button><button id="allOff">Ocultar todo</button></div>
   <h2>Corte por altura</h2>
@@ -106,6 +116,7 @@
     <span id="pCtl" hidden>
       <button id="pPrev" aria-label="Plano anterior">◀</button><button id="pNext" aria-label="Plano siguiente">▶</button>
       <button id="pOut" aria-label="Alejar">−</button><button id="pIn" aria-label="Acercar">+</button><button id="pFit">Ajustar</button>
+      <button id="pFull">Pantalla completa</button>
       <a id="pOpen" target="_blank" rel="noopener"><button>Abrir PDF</button></a>
     </span>
     <button id="pClose">Modelo 3D</button>
@@ -292,7 +303,8 @@ function buildCats(ids){
 }
 $('allOn').onclick = () => { for (const k in groups) groups[k].mesh.visible = true; document.querySelectorAll('#cats input').forEach(i => i.checked = true); needs = true; };
 $('allOff').onclick = () => { for (const k in groups) groups[k].mesh.visible = false; document.querySelectorAll('#cats input').forEach(i => i.checked = false); clearSel(); needs = true; };
-$('togglePanel').onclick = () => $('panel').classList.toggle('open');
+const togglePanel = () => { const o = $('panel').classList.toggle('open'); $('fab').style.display = o ? 'none' : ''; };
+$('togglePanel').onclick = togglePanel; $('fab').onclick = togglePanel; $('closePanel').onclick = togglePanel;
 
 function setupClip(){
   const s = $('clip');
@@ -391,13 +403,23 @@ let pdfjs = null, pdfDoc = null, plist = [], cur = -1, zoom = 1, rtask = null;
 const mobile = matchMedia('(max-width:760px)').matches || coarse;
 const MAX_PIX = mobile ? 16e6 : 60e6;
 $('btnPlanos').onclick = openPlanos;
-$('pClose').onclick = () => { $('planos').hidden = true; needs = true; };
+$('pClose').onclick = () => { exitFs(); $('planos').hidden = true; needs = true; };
 $('pBack').onclick = showGrid;
 $('pPrev').onclick = () => { if (cur > 0) showPage(cur - 1); };
 $('pNext').onclick = () => { if (cur < plist.length - 1) showPage(cur + 1); };
 $('pIn').onclick = () => setZoom(zoom * 1.5);
 $('pOut').onclick = () => setZoom(zoom / 1.5);
 $('pFit').onclick = () => setZoom(1);
+const fsEl = $('planos');
+const canFs = !!(fsEl.requestFullscreen || fsEl.webkitRequestFullscreen);
+if (!canFs) $('pFull').hidden = true;
+$('pFull').onclick = () => {
+  const on = document.fullscreenElement || document.webkitFullscreenElement;
+  if (on) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  else (fsEl.requestFullscreen || fsEl.webkitRequestFullscreen).call(fsEl);
+};
+const onFs = () => { $('pFull').textContent = (document.fullscreenElement || document.webkitFullscreenElement) ? 'Salir de pantalla completa' : 'Pantalla completa'; if (cur >= 0) setTimeout(() => setZoom(zoom), 150); };
+document.addEventListener('fullscreenchange', onFs); document.addEventListener('webkitfullscreenchange', onFs);
 
 async function openPlanos(){
   $('planos').hidden = false;
@@ -439,7 +461,8 @@ const desc = p => p.nums.length ? p.nums.map(n => INDEX[n]).filter(Boolean).join
 async function buildGrid(){
   const g = $('pGrid'); g.innerHTML = '';
   const cards = plist.map((p, k) => {
-    const b = document.createElement('button'); b.className = 'card';
+    const b = document.createElement('div'); b.className = 'card'; b.setAttribute('role', 'button'); b.tabIndex = 0;
+    b.onkeydown = e => { if (e.key === 'Enter') showPage(k); };
     b.innerHTML = '<canvas></canvas><div class="ct"><div class="cn">' + label(p) + '</div><div class="cd">' + esc(desc(p)) + '</div></div>';
     b.onclick = () => showPage(k); g.appendChild(b); return b.querySelector('canvas');
   });
@@ -450,6 +473,7 @@ async function buildGrid(){
     try { await p.page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise; } catch(e) {}
   }
 }
+function exitFs(){ if (document.fullscreenElement || document.webkitFullscreenElement) (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
 function showGrid(){ $('pView').hidden = true; $('pGrid').hidden = false; $('pBack').hidden = true; $('pCtl').hidden = true; $('pStatus').hidden = false; $('pTitle').textContent = 'Planos estructurales'; cur = -1; }
 function showPage(k){
   cur = k; zoom = 1;
@@ -475,6 +499,16 @@ async function renderPage(){
   rtask = p.page.render({ canvasContext: c.getContext('2d'), viewport: vp });
   try { await rtask.promise; } catch(e) {}
 }
+// pellizcar para acercar el plano (celular): vista previa con CSS y luego se vuelve a dibujar nitido
+(() => { const box = $('pView'), c = $('pCanvas'); const pts = new Map(); let d0 = 0, k = 1;
+  box.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') return; pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; d0 = Math.hypot(a[0]-b[0], a[1]-b[1]); k = 1; } });
+  box.addEventListener('pointermove', e => { if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pts.size === 2 && d0) { const [a, b] = [...pts.values()]; k = Math.hypot(a[0]-b[0], a[1]-b[1]) / d0; c.style.transformOrigin = 'center'; c.style.transform = 'scale(' + k + ')'; } });
+  const end = e => { if (!pts.has(e.pointerId)) return; pts.delete(e.pointerId);
+    if (d0 && pts.size < 2) { c.style.transform = ''; d0 = 0; if (Math.abs(k - 1) > 0.05) setZoom(zoom * k); } };
+  box.addEventListener('pointerup', end); box.addEventListener('pointercancel', end);
+})();
 // arrastrar para desplazar el plano con el mouse
 (() => { const box = $('pView'); let d = null;
   box.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') return; d = [e.clientX, e.clientY, box.scrollLeft, box.scrollTop]; box.style.cursor = 'grabbing'; });
