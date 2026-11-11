@@ -262,8 +262,8 @@ function readMarks(data){
   try {
     const s = new TextDecoder('latin1').decode(data);
     const P = new Map(), S = new Map();
-    for (const m of s.matchAll(/#(\d+)= ?IFCPROPERTYSINGLEVALUE\('(Marca|Mark|Partici\\X\\F3n|Partition)',\$,IFC[A-Z]+\('([^']*)'\),\$\);/g))
-      P.set(m[1], [/^Mar/.test(m[2]) ? 'marca' : 'part', decodeIfc(m[3])]);
+    for (const m of s.matchAll(/#(\d+)= ?IFCPROPERTYSINGLEVALUE\('(Marca|Mark|Partici\\X\\F3n|Partition)',\$,IFC[A-Z]+\('((?:[^']|'')*)'\),\$\);/g))
+      P.set(m[1], [/^Mar/.test(m[2]) ? 'marca' : 'part', decodeIfc(m[3].replace(/''/g, "'"))]);   // en IFC el apostrofo va doble: CLT-1D'' = CLT-1D'
     for (const m of s.matchAll(/#(\d+)= ?IFCPROPERTYSET\([^\n]*?\(([#\d,]+)\)\);/g)) {
       const hit = m[2].split(',').map(x => x.replace('#', '')).filter(x => P.has(x)).map(x => P.get(x));
       if (hit.length) S.set(m[1], hit);
