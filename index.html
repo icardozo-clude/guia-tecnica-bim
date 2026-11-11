@@ -76,10 +76,19 @@
   .card .ct{padding:8px 10px}
   .card .cn{font-weight:700;color:var(--accent)}
   .card .cd{font-size:12px;color:var(--muted)}
-  #pView{flex:1;overflow:auto;background:#7d8590;cursor:grab;touch-action:pan-x pan-y}
+  #pView{flex:1;position:relative;overflow:hidden;background:#7d8590;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+  #pView.drag{cursor:grabbing}
+  #pHint{position:absolute;left:50%;bottom:calc(14px + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(0,0,0,.65);color:#fff;font-size:12px;padding:6px 12px;border-radius:16px;white-space:nowrap;pointer-events:none;transition:opacity .6s}
+  #pHint.off{opacity:0}
+  #pGrid.list{display:block;padding:0 0 calc(24px + env(safe-area-inset-bottom))}
+  .pitem{display:flex;align-items:center;gap:12px;width:100%;text-align:left;font:inherit;color:var(--ink);background:var(--panel);border:0;border-bottom:1px solid var(--line);border-radius:0;padding:14px 16px;cursor:pointer}
+  .pitem:active{background:var(--line)}
+  .pitem .pn{flex:0 0 auto;min-width:56px;font-weight:700;color:var(--accent)}
+  .pitem .pd{flex:1;font-size:14px;line-height:1.3}
+  .pitem .pc{flex:0 0 auto;color:var(--muted);font-size:20px}
   #planos:fullscreen{width:100%;height:100%}
   #pView[hidden]{display:none}
-  #pView canvas{display:block;margin:12px auto;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.3)}
+  #pView canvas{position:absolute;left:0;top:0;transform-origin:0 0;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.3);will-change:transform}
   @media (max-width:760px){
     header{padding:8px 16px}
     header p{display:none}
@@ -93,6 +102,7 @@
     #hint{display:none}
     .ptool{padding:6px 8px;gap:4px}
     .ptool button{padding:6px 8px}
+    #planos.viewing #pClose, #planos.viewing #pIn, #planos.viewing #pOut{display:none}
   }
 </style>
 </head>
@@ -149,7 +159,7 @@
   </div>
   <div id="pStatus" class="small"></div>
   <div id="pGrid"></div>
-  <div id="pView" hidden><canvas id="pCanvas"></canvas></div>
+  <div id="pView" hidden><canvas id="pCanvas"></canvas><div id="pHint"></div></div>
 </section>
 
 <div id="loader"><div class="box">
@@ -395,7 +405,7 @@ function nameBeams(){
     if (best) autoName.set(id, 'Ciclópeo ' + best);
   }
 }
-const FILTER_CATS = ['cim', 'cic', 'ace'];
+const FILTER_CATS = ['cim', 'ace'];
 function buildFilter(){
   fgroups = {};
   for (const [id, e] of elems) {
@@ -560,18 +570,19 @@ $('pClose').onclick = () => { exitFs(); $('planos').hidden = true; needs = true;
 $('pBack').onclick = showGrid;
 $('pPrev').onclick = () => { if (cur > 0) showPage(cur - 1); };
 $('pNext').onclick = () => { if (cur < plist.length - 1) showPage(cur + 1); };
-$('pIn').onclick = () => setZoom(zoom * 1.5);
-$('pOut').onclick = () => setZoom(zoom / 1.5);
+$('pIn').onclick = () => zoomCenter(1.5);
+$('pOut').onclick = () => zoomCenter(1 / 1.5);
 $('pFit').onclick = () => setZoom(1);
 const fsEl = $('planos');
 const canFs = !!(fsEl.requestFullscreen || fsEl.webkitRequestFullscreen);
-if (!canFs) $('pFull').hidden = true;
+const fsTxt = on => mobile ? (on ? 'Salir' : '⛶ Completa') : (on ? 'Salir de pantalla completa' : 'Pantalla completa');
+if (!canFs) $('pFull').hidden = true; else $('pFull').textContent = fsTxt(false);
 $('pFull').onclick = () => {
   const on = document.fullscreenElement || document.webkitFullscreenElement;
   if (on) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
   else (fsEl.requestFullscreen || fsEl.webkitRequestFullscreen).call(fsEl);
 };
-const onFs = () => { $('pFull').textContent = (document.fullscreenElement || document.webkitFullscreenElement) ? 'Salir de pantalla completa' : 'Pantalla completa'; if (cur >= 0) setTimeout(() => setZoom(zoom), 150); };
+const onFs = () => { $('pFull').textContent = fsTxt(document.fullscreenElement || document.webkitFullscreenElement); if (cur >= 0) setTimeout(() => { fitPage(); renderPage(); }, 150); };
 document.addEventListener('fullscreenchange', onFs); document.addEventListener('webkitfullscreenchange', onFs);
 
 async function openPlanos(){
@@ -603,7 +614,7 @@ async function openPlanos(){
     }
     plist.sort((a, b) => (a.nums.length ? a.nums[0] : -1) - (b.nums.length ? b.nums[0] : -1));
     buildGrid();
-    $('pStatus').textContent = plist.length + ' pliegos. Toca uno para verlo.';
+    $('pStatus').textContent = plist.length + ' pliegos. ' + (mobile ? 'Toca uno para abrirlo.' : 'Haz clic en uno para verlo.');
   } catch(e) {
     console.error(e);
     $('pStatus').innerHTML = 'No se pudieron cargar los planos: ' + esc(e.message || e) + '. Revisa que el archivo se llame <b>planos.pdf</b> y esté junto a index.html.';
@@ -613,6 +624,16 @@ const label = p => p.nums.length ? p.nums.map(n => 'E-' + n).join(' · ') : 'Por
 const desc = p => p.nums.length ? p.nums.map(n => INDEX[n]).filter(Boolean).join(' / ') : 'Datos del proyecto y código QR';
 async function buildGrid(){
   const g = $('pGrid'); g.innerHTML = '';
+  if (mobile) {
+    // celular: lista de texto, sin miniaturas
+    g.classList.add('list');
+    plist.forEach((p, k) => {
+      const b = document.createElement('button'); b.className = 'pitem';
+      b.innerHTML = '<span class="pn">' + label(p) + '</span><span class="pd">' + esc(desc(p)) + '</span><span class="pc">›</span>';
+      b.onclick = () => showPage(k); g.appendChild(b);
+    });
+    return;
+  }
   const cards = plist.map((p, k) => {
     const b = document.createElement('div'); b.className = 'card'; b.setAttribute('role', 'button'); b.tabIndex = 0;
     b.onkeydown = e => { if (e.key === 'Enter') showPage(k); };
@@ -627,47 +648,102 @@ async function buildGrid(){
   }
 }
 function exitFs(){ if (document.fullscreenElement || document.webkitFullscreenElement) (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
-function showGrid(){ $('pView').hidden = true; $('pGrid').hidden = false; $('pBack').hidden = true; $('pCtl').hidden = true; $('pStatus').hidden = false; $('pTitle').textContent = 'Planos estructurales'; cur = -1; }
+function showGrid(){ $('planos').classList.remove('viewing'); $('pView').hidden = true; $('pGrid').hidden = false; $('pBack').hidden = true; $('pCtl').hidden = true; $('pStatus').hidden = false; $('pTitle').textContent = 'Planos estructurales'; cur = -1; }
+// ---- visor de planos: desplazar y acercar (dedo, pellizco, mouse y rueda) ----
+const V = { s: 1, tx: 0, ty: 0, sr: 0, w0: 0, h0: 0, smaxR: 1 };
+const SMAX = 12;
+let rTimer = null, rGen = 0;
 function showPage(k){
-  cur = k; zoom = 1;
+  cur = k; $('planos').classList.add('viewing');
   $('pGrid').hidden = true; $('pStatus').hidden = true; $('pView').hidden = false; $('pBack').hidden = false; $('pCtl').hidden = false;
   $('pTitle').textContent = label(plist[k]);
   $('pOpen').href = PDF_URL + '#page=' + plist[k].i;
-  renderPage();
+  $('pCanvas').getContext('2d').clearRect(0, 0, $('pCanvas').width, $('pCanvas').height);
+  fitPage(); renderPage();
+  const h = $('pHint'); h.textContent = coarse ? 'Pellizca para acercar · arrastra para mover · doble toque' : 'Rueda para acercar · arrastra para mover · doble clic';
+  h.classList.remove('off'); clearTimeout(h._t); h._t = setTimeout(() => h.classList.add('off'), 3500);
 }
-function setZoom(z){ const box = $('pView'); const cx = (box.scrollLeft + box.clientWidth / 2) / box.scrollWidth, cy = (box.scrollTop + box.clientHeight / 2) / box.scrollHeight;
-  zoom = Math.max(1, z); renderPage().then(() => { box.scrollLeft = cx * box.scrollWidth - box.clientWidth / 2; box.scrollTop = cy * box.scrollHeight - box.clientHeight / 2; }); }
-async function renderPage(){
-  const p = plist[cur], box = $('pView'), c = $('pCanvas');
-  const vp0 = p.page.getViewport({ scale: 1 });
-  const fit = (box.clientWidth - 24) / vp0.width;
+function fitPage(){
+  const p = plist[cur], box = $('pView'), vp0 = p.page.getViewport({ scale: 1 });
+  const f = Math.min((box.clientWidth - 16) / vp0.width, (box.clientHeight - 16) / vp0.height);
+  V.w0 = vp0.width * f; V.h0 = vp0.height * f; V.s = 1; V.sr = 0;
   const dpr = Math.min(devicePixelRatio || 1, 2);
-  let css = fit * zoom;
-  const maxCss = Math.sqrt(MAX_PIX / (vp0.width * vp0.height)) / dpr;
-  if (css > maxCss) { css = maxCss; zoom = css / fit; }
-  const vp = p.page.getViewport({ scale: css * dpr });
-  if (rtask) { try { rtask.cancel(); } catch(e) {} }
-  c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
-  c.style.width = Math.floor(vp.width / dpr) + 'px'; c.style.height = Math.floor(vp.height / dpr) + 'px';
-  rtask = p.page.render({ canvasContext: c.getContext('2d'), viewport: vp });
-  try { await rtask.promise; } catch(e) {}
+  V.smaxR = Math.max(1, Math.sqrt(MAX_PIX / (V.w0 * V.h0)) / dpr);
+  clampV(); applyV();
 }
-// pellizcar para acercar el plano (celular): vista previa con CSS y luego se vuelve a dibujar nitido
-(() => { const box = $('pView'), c = $('pCanvas'); const pts = new Map(); let d0 = 0, k = 1;
-  box.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') return; pts.set(e.pointerId, [e.clientX, e.clientY]);
-    if (pts.size === 2) { const [a, b] = [...pts.values()]; d0 = Math.hypot(a[0]-b[0], a[1]-b[1]); k = 1; } });
-  box.addEventListener('pointermove', e => { if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, [e.clientX, e.clientY]);
-    if (pts.size === 2 && d0) { const [a, b] = [...pts.values()]; k = Math.hypot(a[0]-b[0], a[1]-b[1]) / d0; c.style.transformOrigin = 'center'; c.style.transform = 'scale(' + k + ')'; } });
-  const end = e => { if (!pts.has(e.pointerId)) return; pts.delete(e.pointerId);
-    if (d0 && pts.size < 2) { c.style.transform = ''; d0 = 0; if (Math.abs(k - 1) > 0.05) setZoom(zoom * k); } };
+function clampV(){
+  const box = $('pView'), bw = box.clientWidth, bh = box.clientHeight, W = V.w0 * V.s, H = V.h0 * V.s;
+  V.tx = W <= bw ? (bw - W) / 2 : Math.min(0, Math.max(bw - W, V.tx));
+  V.ty = H <= bh ? (bh - H) / 2 : Math.min(0, Math.max(bh - H, V.ty));
+}
+function applyV(){ const c = $('pCanvas'); const k = V.sr ? V.s / V.sr : V.s;
+  c.style.transform = 'translate(' + V.tx + 'px,' + V.ty + 'px) scale(' + k + ')'; }
+function zoomAt(k, mx, my){
+  const s1 = Math.max(1, Math.min(SMAX, V.s * k)); const px = (mx - V.tx) / V.s, py = (my - V.ty) / V.s;
+  V.s = s1; V.tx = mx - px * s1; V.ty = my - py * s1; clampV(); applyV(); laterRender();
+}
+function zoomCenter(k){ const b = $('pView'); zoomAt(k, b.clientWidth / 2, b.clientHeight / 2); }
+function setZoom(z){ if (z <= 1) { V.s = 1; clampV(); applyV(); laterRender(); } else zoomCenter(z / V.s); }
+function laterRender(){ clearTimeout(rTimer); rTimer = setTimeout(renderPage, 220); }
+async function renderPage(){
+  if (cur < 0) return;
+  const p = plist[cur], c = $('pCanvas'), gen = ++rGen;
+  const sr = Math.min(V.s, V.smaxR);
+  if (V.sr && Math.abs(sr - V.sr) / V.sr < 0.02) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2), vp0 = p.page.getViewport({ scale: 1 });
+  const vp = p.page.getViewport({ scale: V.w0 * sr * dpr / vp0.width });
+  const off = document.createElement('canvas'); off.width = Math.floor(vp.width); off.height = Math.floor(vp.height);
+  if (rtask) { try { rtask.cancel(); } catch(e) {} }
+  rtask = p.page.render({ canvasContext: off.getContext('2d'), viewport: vp });
+  try { await rtask.promise; } catch(e) { return; }
+  if (gen !== rGen) return;
+  c.width = off.width; c.height = off.height; c.getContext('2d').drawImage(off, 0, 0);
+  c.style.width = (V.w0 * sr) + 'px'; c.style.height = (V.h0 * sr) + 'px';
+  V.sr = sr; applyV();
+}
+(() => {
+  const box = $('pView'), pts = new Map(); let g = null, tap = { t: 0, x: 0, y: 0 }, moved = 0;
+  const rel = e => { const r = box.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  const start = () => {
+    const v = [...pts.values()];
+    if (v.length >= 2) { const [a, b] = v; g = { two: true, d0: Math.hypot(a[0]-b[0], a[1]-b[1]) || 1, m0: [(a[0]+b[0])/2, (a[1]+b[1])/2], s0: V.s, tx0: V.tx, ty0: V.ty }; }
+    else if (v.length === 1) g = { two: false, p0: v[0], tx0: V.tx, ty0: V.ty };
+    else g = null;
+  };
+  box.addEventListener('pointerdown', e => {
+    if (e.button > 0) return;
+    try { box.setPointerCapture(e.pointerId); } catch(_) {} pts.set(e.pointerId, rel(e)); moved = 0; start(); box.classList.add('drag');
+  });
+  box.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId) || !g) return; pts.set(e.pointerId, rel(e));
+    const v = [...pts.values()];
+    if (g.two && v.length >= 2) {
+      const [a, b] = v, d = Math.hypot(a[0]-b[0], a[1]-b[1]), m = [(a[0]+b[0])/2, (a[1]+b[1])/2];
+      const s1 = Math.max(1, Math.min(SMAX, g.s0 * d / g.d0));
+      const px = (g.m0[0] - g.tx0) / g.s0, py = (g.m0[1] - g.ty0) / g.s0;
+      V.s = s1; V.tx = m[0] - px * s1; V.ty = m[1] - py * s1; moved = 99;
+    } else if (!g.two) {
+      const dx = v[0][0] - g.p0[0], dy = v[0][1] - g.p0[1]; moved = Math.max(moved, Math.hypot(dx, dy));
+      V.tx = g.tx0 + dx; V.ty = g.ty0 + dy;
+    }
+    clampV(); applyV();
+  });
+  const end = e => {
+    if (!pts.has(e.pointerId)) return; const p = pts.get(e.pointerId); pts.delete(e.pointerId);
+    if (pts.size) { start(); return; }
+    box.classList.remove('drag'); g = null;
+    if (moved < 8 && e.type === 'pointerup') {   // doble toque o doble clic
+      const now = performance.now();
+      if (now - tap.t < 320 && Math.hypot(p[0] - tap.x, p[1] - tap.y) < 30) { zoomAt(V.s > 1.5 ? 1 / V.s : 3, p[0], p[1]); tap.t = 0; return; }
+      tap = { t: now, x: p[0], y: p[1] };
+    }
+    laterRender();
+  };
   box.addEventListener('pointerup', end); box.addEventListener('pointercancel', end);
-})();
-// arrastrar para desplazar el plano con el mouse
-(() => { const box = $('pView'); let d = null;
-  box.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') return; d = [e.clientX, e.clientY, box.scrollLeft, box.scrollTop]; box.style.cursor = 'grabbing'; });
-  addEventListener('pointermove', e => { if (!d) return; box.scrollLeft = d[2] - (e.clientX - d[0]); box.scrollTop = d[3] - (e.clientY - d[1]); });
-  addEventListener('pointerup', () => { d = null; box.style.cursor = ''; });
-  box.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.25 : 0.8)); }, { passive: false });
+  box.addEventListener('wheel', e => { e.preventDefault(); const [x, y] = rel(e); zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, x, y); }, { passive: false });
+  // Safari iOS: evitar el zoom de toda la pagina con el pellizco
+  ['gesturestart', 'gesturechange'].forEach(t => box.addEventListener(t, e => e.preventDefault()));
+  addEventListener('resize', () => { if (cur >= 0 && !$('pView').hidden) { fitPage(); renderPage(); } });
 })();
 
 document.querySelectorAll('#panel details.sec').forEach((d, i) => {
