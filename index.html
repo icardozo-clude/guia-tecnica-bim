@@ -126,10 +126,10 @@
   </details>
   <details class="sec" open><summary>Filtro por elemento</summary>
     <select id="fCat" aria-label="Grupo de elementos"></select>
-    <input id="fSearch" type="search" placeholder="Buscar, por ejemplo VC-A" aria-label="Buscar elemento">
+    <input id="fSearch" type="search" placeholder="Buscar, por ejemplo VC-A o CLT-1A" aria-label="Buscar elemento">
     <div class="row"><button id="fAll">Mostrar todos</button><button id="fNone">Ocultar todos</button><button id="fReset">Restablecer</button></div>
     <div id="fList"></div>
-    <p class="small">Marca la casilla para mostrar u ocultar. El botón ◎ deja visible solo ese elemento y lo acerca; en las vigas de cimentación muestra también su acero.</p>
+    <p class="small">Marca la casilla para mostrar u ocultar. El botón ◎ deja visible solo ese elemento y lo acerca; en las vigas de cimentación y en las columnetas muestra también su acero.</p>
   </details>
   <details class="sec" open><summary>Corte por altura</summary>
     <input id="clip" type="range" min="0" max="1000" value="1000" aria-label="Altura del corte">
@@ -374,6 +374,7 @@ let fgroups = {};   // cat -> [{key, label, ids:[]}]
 function labelOf(id){
   const e = elems.get(id) || {}, m = marks.get(id) || {};
   if (e.cat === 'ace') return m.part ? 'Acero ' + m.part : 'Sin partición · ' + ((e.name || '').split(':')[1] || 'acero');
+  if (e.cat === 'col') return (m.marca || 'Sin marca') + ' · piso ' + (colFloor.get(id) || 1);
   if (m.marca) return m.marca;
   if (autoName.has(id)) return autoName.get(id);
   const p = (e.name || '').split(':');
@@ -405,8 +406,18 @@ function nameBeams(){
     if (best) autoName.set(id, 'Ciclópeo ' + best);
   }
 }
-const FILTER_CATS = ['cim', 'ace'];
+const FILTER_CATS = ['cim', 'col', 'ace'];
+// piso de cada columneta: piso 2 si arranca a mas de 1,50 m sobre la columneta mas baja
+const colFloor = new Map();
+const bbOf = id => { const b = new THREE.Box3(), v = new THREE.Vector3();
+  for (const r of (ranges.get(id) || [])) { const a = groups[r.cat].mesh.geometry.attributes.position.array; for (let i = r.start; i < r.start + r.count; i++) b.expandByPoint(v.set(a[i*3], a[i*3+1], a[i*3+2])); } return b; };
+function floorCols(){
+  const cols = [...elems].filter(([id, e]) => e.cat === 'col' && ranges.has(id)).map(([id]) => [id, bbOf(id)]);
+  if (!cols.length) return; const y0 = Math.min(...cols.map(([, b]) => b.min.y));
+  for (const [id, b] of cols) colFloor.set(id, b.min.y > y0 + 1.5 ? 2 : 1);
+}
 function buildFilter(){
+  try { floorCols(); } catch(e) { console.warn('pisos', e); }
   fgroups = {};
   for (const [id, e] of elems) {
     if (!ranges.has(id) || !FILTER_CATS.includes(e.cat)) continue;
@@ -452,7 +463,14 @@ function isolate(cat, g){
   hidden.clear();
   const keep = new Set(g.ids);
   // acero con la misma particion que la marca del elemento (p. ej. VC-A)
-  const steel = cat === 'cim' ? (fgroups.ace || []).find(a => a.label === 'Acero ' + g.label) : null;
+  let steel = null;
+  if (cat === 'cim') steel = (fgroups.ace || []).find(a => a.label === 'Acero ' + g.label);
+  if (cat === 'col') {   // acero de la columneta: misma particion que su marca y a la misma altura
+    const mk = g.label.split(' · piso')[0], sg = (fgroups.ace || []).find(a => a.label === 'Acero ' + mk);
+    if (sg) { const B = new THREE.Box3(); for (const id of g.ids) B.union(bbOf(id)); B.expandByScalar(0.3);
+      const c = new THREE.Vector3(); const ids = sg.ids.filter(id => B.containsPoint(bbOf(id).getCenter(c)));
+      if (ids.length) steel = { ids }; }
+  }
   if (steel) steel.ids.forEach(id => keep.add(id));
   for (const [id, e] of elems) if (!keep.has(id)) hidden.add(id);
   for (const k in groups) { setCat(k, k === cat || (steel && k === 'ace')); applyHidden(k); }
