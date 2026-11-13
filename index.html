@@ -87,6 +87,17 @@
   .pitem .pd{flex:1;font-size:14px;line-height:1.3}
   .pitem .pc{flex:0 0 auto;color:var(--muted);font-size:20px}
   #planos:fullscreen{width:100%;height:100%}
+  #memo{position:absolute;inset:0;z-index:7;background:var(--bg);display:flex;flex-direction:column}
+  #memo[hidden]{display:none}
+  #mToc{max-width:260px;font:inherit;padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
+  #mToc[hidden]{display:none}
+  #mPage{font-size:12px;color:var(--muted);white-space:nowrap}
+  #mScroll{flex:1;overflow:auto;background:#7d8590;touch-action:pan-x pan-y;-webkit-overflow-scrolling:touch}
+  #mPages{padding:12px 0 calc(40px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:12px;min-width:min-content}
+  .mp{position:relative;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.3);flex:0 0 auto}
+  .mp canvas{position:absolute;inset:0;width:100%;height:100%}
+  .mp .mn{position:absolute;right:6px;bottom:4px;font-size:10px;color:#999}
+  #mStatus{padding:6px 16px}
   #pView[hidden]{display:none}
   #pView canvas{position:absolute;left:0;top:0;transform-origin:0 0;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.3);will-change:transform}
   @media (max-width:760px){
@@ -103,6 +114,8 @@
     .ptool{padding:6px 8px;gap:4px}
     .ptool button{padding:6px 8px}
     #planos.viewing #pClose, #planos.viewing #pIn, #planos.viewing #pOut{display:none}
+    #mToc{max-width:150px}
+    #mDown .lg{display:none}
   }
 </style>
 </head>
@@ -113,6 +126,7 @@
     <p>Modelo BIM estructural · Iván Camilo Cardoso Valbuena · Universidad Colegio Mayor de Cundinamarca</p>
   </div>
   <button id="btnPlanos">Planos</button>
+  <button id="btnMemo">Memoria</button>
   <button id="togglePanel" aria-label="Mostrar opciones">Opciones</button>
 </header>
 <div id="view"></div>
@@ -126,10 +140,10 @@
   </details>
   <details class="sec" open><summary>Filtro por elemento</summary>
     <select id="fCat" aria-label="Grupo de elementos"></select>
-    <input id="fSearch" type="search" placeholder="Buscar, por ejemplo VC-A o CLT-1A" aria-label="Buscar elemento">
+    <input id="fSearch" type="search" placeholder="Buscar, por ejemplo VC-A, VE-B o CLT-1A" aria-label="Buscar elemento">
     <div class="row"><button id="fAll">Mostrar todos</button><button id="fNone">Ocultar todos</button><button id="fReset">Restablecer</button></div>
     <div id="fList"></div>
-    <p class="small">Marca la casilla para mostrar u ocultar. El botón ◎ deja visible solo ese elemento y lo acerca; en las vigas de cimentación y en las columnetas muestra también su acero.</p>
+    <p class="small">Marca la casilla para mostrar u ocultar. El botón ◎ deja visible solo ese elemento y lo acerca; en las vigas de cimentación, las de entrepiso y las columnetas muestra también su acero.</p>
   </details>
   <details class="sec" open><summary>Corte por altura</summary>
     <input id="clip" type="range" min="0" max="1000" value="1000" aria-label="Altura del corte">
@@ -160,6 +174,20 @@
   <div id="pStatus" class="small"></div>
   <div id="pGrid"></div>
   <div id="pView" hidden><canvas id="pCanvas"></canvas><div id="pHint"></div></div>
+</section>
+
+<section id="memo" hidden>
+  <div class="ptool">
+    <strong>Memoria estructural</strong>
+    <select id="mToc" hidden aria-label="Ir a un capítulo"></select>
+    <span class="sp"></span>
+    <span id="mPage"></span>
+    <button id="mOut" aria-label="Alejar">−</button><button id="mIn" aria-label="Acercar">+</button><button id="mFit">Ajustar</button>
+    <a id="mDown" href="memoria.pdf" download><button>⤓<span class="lg"> Descargar PDF</span></button></a>
+    <button id="mClose">Modelo 3D</button>
+  </div>
+  <div id="mStatus" class="small"></div>
+  <div id="mScroll"><div id="mPages"></div></div>
 </section>
 
 <div id="loader"><div class="box">
@@ -376,6 +404,7 @@ function labelOf(id){
   if (e.cat === 'ace') return m.part ? 'Acero ' + m.part : 'Sin partición · ' + ((e.name || '').split(':')[1] || 'acero');
   if (e.cat === 'col') return (m.marca || 'Sin marca') + ' · piso ' + (colFloor.get(id) || 1);
   if (m.marca) return m.marca;
+  if (e.cat === 'vig') return 'Sin marca';
   if (autoName.has(id)) return autoName.get(id);
   const p = (e.name || '').split(':');
   return (p.length > 1 ? p[1] : (p[0] || 'Elemento')) + ' · ' + (p[2] || id);
@@ -406,7 +435,7 @@ function nameBeams(){
     if (best) autoName.set(id, 'Ciclópeo ' + best);
   }
 }
-const FILTER_CATS = ['cim', 'col', 'ace'];
+const FILTER_CATS = ['cim', 'col', 'vig', 'ace'];
 // piso de cada columneta: piso 2 si arranca a mas de 1,50 m sobre la columneta mas baja
 const colFloor = new Map();
 const bbOf = id => { const b = new THREE.Box3(), v = new THREE.Vector3();
@@ -464,7 +493,7 @@ function isolate(cat, g){
   const keep = new Set(g.ids);
   // acero con la misma particion que la marca del elemento (p. ej. VC-A)
   let steel = null;
-  if (cat === 'cim') steel = (fgroups.ace || []).find(a => a.label === 'Acero ' + g.label);
+  if (cat === 'cim' || cat === 'vig') steel = g.label === 'Sin marca' ? null : (fgroups.ace || []).find(a => a.label === 'Acero ' + g.label);
   if (cat === 'col') {   // acero de la columneta: misma particion que su marca y a la misma altura
     const mk = g.label.split(' · piso')[0], sg = (fgroups.ace || []).find(a => a.label === 'Acero ' + mk);
     if (sg) { const B = new THREE.Box3(); for (const id of g.ids) B.union(bbOf(id)); B.expandByScalar(0.3);
@@ -603,21 +632,26 @@ $('pFull').onclick = () => {
 const onFs = () => { $('pFull').textContent = fsTxt(document.fullscreenElement || document.webkitFullscreenElement); if (cur >= 0) setTimeout(() => { fitPage(); renderPage(); }, 150); };
 document.addEventListener('fullscreenchange', onFs); document.addEventListener('webkitfullscreenchange', onFs);
 
+async function loadPdfjs(){
+  if (pdfjs) return pdfjs;
+  let err = [];
+  for (const v of PDFJS_VERSIONS) {
+    try {
+      const base = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + v + '/build/';
+      const mod = await import(base + 'pdf.min.mjs');
+      mod.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.mjs';
+      pdfjs = mod; return pdfjs;
+    } catch(e) { err.push(v + ': ' + e.message); }
+  }
+  throw new Error('no cargó el lector de PDF (' + err.join(' | ') + ')');
+}
 async function openPlanos(){
+  $('memo').hidden = true;
   $('planos').hidden = false;
   if (pdfDoc) return;
   $('pStatus').textContent = 'Cargando los planos…';
   try {
-    let err = [];
-    for (const v of PDFJS_VERSIONS) {
-      try {
-        const base = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + v + '/build/';
-        const mod = await import(base + 'pdf.min.mjs');
-        mod.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.mjs';
-        pdfjs = mod; break;
-      } catch(e) { err.push(v + ': ' + e.message); }
-    }
-    if (!pdfjs) throw new Error('no cargó el lector de PDF (' + err.join(' | ') + ')');
+    await loadPdfjs();
     pdfDoc = await pdfjs.getDocument({ url: PDF_URL }).promise;
     for (let i = 1; i <= pdfDoc.numPages; i++) {
       $('pStatus').textContent = 'Leyendo hoja ' + i + ' de ' + pdfDoc.numPages;
@@ -762,6 +796,100 @@ async function renderPage(){
   // Safari iOS: evitar el zoom de toda la pagina con el pellizco
   ['gesturestart', 'gesturechange'].forEach(t => box.addEventListener(t, e => e.preventDefault()));
   addEventListener('resize', () => { if (cur >= 0 && !$('pView').hidden) { fitPage(); renderPage(); } });
+})();
+
+// ---------- memoria (lector continuo) ----------
+const MEMO_URL = 'memoria.pdf';
+let mDoc = null, mZoom = 1, mBaseW = 0, mPagesInfo = [], mTimer = null, mObs = null, mVisible = new Set();
+$('btnMemo').onclick = openMemo;
+$('mClose').onclick = () => { $('memo').hidden = true; needs = true; };
+$('mIn').onclick = () => setMZoom(mZoom * 1.25);
+$('mOut').onclick = () => setMZoom(mZoom / 1.25);
+$('mFit').onclick = () => setMZoom(1);
+async function openMemo(){
+  $('planos').hidden = true; $('memo').hidden = false;
+  if (mDoc) return;
+  $('mStatus').textContent = 'Cargando la memoria…';
+  try {
+    await loadPdfjs();
+    mDoc = await pdfjs.getDocument({ url: MEMO_URL }).promise;
+    const box = $('mScroll');
+    mBaseW = Math.min(box.clientWidth - (mobile ? 12 : 48), 900);
+    const wrap = $('mPages'); wrap.innerHTML = '';
+    for (let i = 1; i <= mDoc.numPages; i++) {
+      const page = await mDoc.getPage(i), vp = page.getViewport({ scale: 1 });
+      const d = document.createElement('div'); d.className = 'mp'; d.dataset.i = i;
+      d.innerHTML = '<canvas></canvas><span class="mn">' + i + '</span>';
+      wrap.appendChild(d); mPagesInfo.push({ page, ratio: vp.height / vp.width, el: d, rs: 0, task: null });
+      if (i % 10 === 0) $('mStatus').textContent = 'Preparando página ' + i + ' de ' + mDoc.numPages;
+    }
+    sizeMPages();
+    mObs = new IntersectionObserver(es => { for (const e of es) { const k = +e.target.dataset.i - 1; if (e.isIntersecting) { mVisible.add(k); renderM(k); } else mVisible.delete(k); } updMPage(); },
+      { root: box, rootMargin: '600px 0px' });
+    mPagesInfo.forEach(p => mObs.observe(p.el));
+    box.addEventListener('scroll', updMPage, { passive: true });
+    $('mStatus').textContent = ''; $('mStatus').hidden = true;
+    buildToc();
+  } catch(e) {
+    console.error(e);
+    $('mStatus').innerHTML = 'No se pudo cargar la memoria: ' + esc(e.message || e) + '. Revisa que el archivo se llame <b>memoria.pdf</b> y esté junto a index.html.';
+  }
+}
+function sizeMPages(){
+  const w = mBaseW * mZoom;
+  for (const p of mPagesInfo) { p.el.style.width = w + 'px'; p.el.style.height = (w * p.ratio) + 'px'; }
+}
+async function renderM(k){
+  const p = mPagesInfo[k]; if (!p) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2), w = mBaseW * mZoom;
+  const target = Math.min(w * dpr, mobile ? 2200 : 3200);
+  if (p.rs && Math.abs(p.rs - target) / target < 0.05) return;
+  if (p.task) { try { p.task.cancel(); } catch(_) {} }
+  const vp0 = p.page.getViewport({ scale: 1 }), vp = p.page.getViewport({ scale: target / vp0.width });
+  const off = document.createElement('canvas'); off.width = Math.floor(vp.width); off.height = Math.floor(vp.height);
+  p.task = p.page.render({ canvasContext: off.getContext('2d'), viewport: vp });
+  try { await p.task.promise; } catch(_) { return; }
+  const c = p.el.querySelector('canvas'); c.width = off.width; c.height = off.height; c.getContext('2d').drawImage(off, 0, 0);
+  p.rs = target;
+  // libera memoria de paginas lejanas
+  for (let j = 0; j < mPagesInfo.length; j++) if (Math.abs(j - k) > 12 && mPagesInfo[j].rs && !mVisible.has(j)) { const cj = mPagesInfo[j].el.querySelector('canvas'); cj.width = cj.height = 1; mPagesInfo[j].rs = 0; }
+}
+function setMZoom(z, cx, cy){
+  const box = $('mScroll'); z = Math.max(0.6, Math.min(5, z));
+  cx = cx ?? box.clientWidth / 2; cy = cy ?? box.clientHeight / 2;
+  const fx = (box.scrollLeft + cx) / box.scrollWidth, fy = (box.scrollTop + cy) / box.scrollHeight;
+  mZoom = z; sizeMPages();
+  box.scrollLeft = fx * box.scrollWidth - cx; box.scrollTop = fy * box.scrollHeight - cy;
+  clearTimeout(mTimer); mTimer = setTimeout(() => mVisible.forEach(renderM), 250);
+}
+function updMPage(){
+  if (!mPagesInfo.length) return;
+  const box = $('mScroll'), mid = box.scrollTop + box.clientHeight / 3;
+  let k = 0; for (let j = 0; j < mPagesInfo.length; j++) { if (mPagesInfo[j].el.offsetTop <= mid) k = j; else break; }
+  $('mPage').textContent = 'Pág. ' + (k + 1) + ' / ' + mPagesInfo.length;
+}
+async function buildToc(){
+  try {
+    const ol = await mDoc.getOutline(); if (!ol || !ol.length) return;
+    const sel = $('mToc'); sel.innerHTML = '<option value="">Ir a…</option>';
+    const add = async (items, lvl) => { for (const it of items) {
+      let dest = it.dest; if (typeof dest === 'string') dest = await mDoc.getDestination(dest);
+      if (dest && dest[0]) { const pi = await mDoc.getPageIndex(dest[0]); const o = document.createElement('option'); o.value = pi; o.textContent = '  '.repeat(lvl) + it.title; sel.appendChild(o); }
+      if (it.items && it.items.length && lvl < 1) await add(it.items, lvl + 1);
+    } };
+    await add(ol, 0); sel.hidden = false;
+    sel.onchange = () => { if (sel.value !== '') { const p = mPagesInfo[+sel.value]; $('mScroll').scrollTop = p.el.offsetTop - 8; } sel.value = ''; };
+  } catch(e) { console.warn('indice', e); }
+}
+(() => {   // pellizco en celular
+  const box = $('mScroll'); let t0 = null;
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  box.addEventListener('touchstart', e => { if (e.touches.length === 2) { const r = box.getBoundingClientRect(); t0 = { d: dist(e.touches), z: mZoom, cx: (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left, cy: (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top }; } }, { passive: true });
+  box.addEventListener('touchmove', e => { if (t0 && e.touches.length === 2) { e.preventDefault(); setMZoom(t0.z * dist(e.touches) / t0.d, t0.cx, t0.cy); } }, { passive: false });
+  box.addEventListener('touchend', e => { if (e.touches.length < 2) t0 = null; });
+  box.addEventListener('wheel', e => { if (e.ctrlKey) { e.preventDefault(); const r = box.getBoundingClientRect(); setMZoom(mZoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1), e.clientX - r.left, e.clientY - r.top); } }, { passive: false });
+  ['gesturestart', 'gesturechange'].forEach(t => box.addEventListener(t, e => e.preventDefault()));
+  addEventListener('resize', () => { if (mDoc && !$('memo').hidden) { mBaseW = Math.min(box.clientWidth - (mobile ? 12 : 48), 900); sizeMPages(); mVisible.forEach(k => { mPagesInfo[k].rs = 0; renderM(k); }); } });
 })();
 
 document.querySelectorAll('#panel details.sec').forEach((d, i) => {
